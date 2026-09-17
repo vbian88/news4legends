@@ -1,0 +1,142 @@
+[
+  {
+    "name": "News 4 Legends — Daily Intelligence Digest",
+    "description": null,
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 7,
+                "triggerAtMinute": 30
+              },
+              {
+                "triggerAtHour": 17,
+                "triggerAtMinute": 30
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          0
+        ],
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://news4legends-worker:8080/run",
+          "options": {
+            "response": {
+              "response": {}
+            },
+            "timeout": 360000
+          },
+          "sendQuery": false,
+          "sendHeaders": false,
+          "sendBody": false
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          176,
+          16
+        ],
+        "name": "HTTP Request"
+      },
+      {
+        "parameters": {
+                    "chatId": "YOUR_TELEGRAM_CHAT_ID",
+          "text": "={{ $json.telegram }}",
+          "additionalFields": {}
+        },
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          416,
+          176
+        ],
+        "name": "Send a text message",
+                "disabled": true
+      },
+      {
+        "parameters": {
+          "sendTo": "YOUR_EMAIL@example.com",
+          "subject": "News 4 Legends — Daily Intelligence Digest",
+          "message": "={{ $json.email }}",
+          "options": {
+            "bccList": ""
+          }
+        },
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.2,
+        "position": [
+          368,
+          -128
+        ],
+        "name": "Send a message",
+                "disabled": true
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Send a message",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Send a text message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send a message": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "availableInMCP": false,
+      "timeSavedMode": "fixed",
+      "timezone": "Europe/London",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+        "meta": {
+            "templateCredsSetupCompleted": false
+        },
+    "nodeGroups": [],
+    "pinData": {},
+        "versionCounter": 1,
+        "triggerCount": 0,
+    "sourceWorkflowId": null,
+    "versionMetadata": {
+            "name": "sanitized public example",
+      "description": ""
+    }
+  }
+]

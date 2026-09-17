@@ -1,0 +1,78 @@
+# ============================================================
+# News 4 Legends — files that must never be committed
+# ============================================================
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local environment / credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.credentials
+*credentials*.json
+*client_secret*.json
+*oauth*.json
+*token*.json
+
+# Secrets
+secrets/*
+!secrets/README.md
+.secret/
+*.secret
+
+# Production databases / runtime data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+data/
+runtime/
+output/
+tmp/
+
+# Generated article/digest data
+*_articles.json
+*_digest.json
+*_delivery.json
+
+# Local backups / working copies
+*.bak
+*.bak.*
+*.bak-*
+*.save
+*.save.*
+*.old
+*.orig
+*~
+
+# Logs
+*.log
+logs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local deployment/config overrides
+docker-compose.override.yml
+compose.override.yml
+
+# n8n exports may contain credentials or personal data.
+# The sanitized public example belongs at n8n/workflow.example.json.
+n8n-export*.json
+n8n_export*.json

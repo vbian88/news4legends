@@ -1,0 +1,6 @@
+requests
+PyYAML
+beautifulsoup4
+trafilatura
+dateparser
+lxml_html_clean

@@ -1,0 +1,61 @@
+services:
+
+  news4legends-ui:
+    build:
+      context: .
+      dockerfile: docker/ui/Dockerfile
+    image: news4legends-ui:local
+    container_name: news4legends-ui
+    restart: unless-stopped
+    ports:
+      - "${NEWS4LEGENDS_UI_PORT:-8081}:8080"
+    volumes:
+      - news4legends_data:/data
+    networks:
+      - news4legends-control
+
+  news4legends-worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    image: news4legends-worker:local
+    container_name: news4legends-worker
+    restart: unless-stopped
+    volumes:
+      - news4legends_data:/config:ro
+      - news4legends_runtime:/data
+      - ./config/collector.yaml:/config/collector.yaml:ro
+      - ./secrets/llm_api_key:/run/secrets/llm_api_key:ro
+    environment:
+      TZ: "${TZ:-Europe/London}"
+      OMNIROUTE_API_URL: "${LLM_API_URL}"
+      OMNIROUTE_MODEL: "${LLM_MODEL}"
+      OMNIROUTE_API_KEY_FILE: "/run/secrets/llm_api_key"
+    networks:
+      - news4legends-control
+      - news4legends-llm
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: news4legends-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-31002}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      TZ: "${TZ:-Europe/London}"
+      N8N_SECURE_COOKIE: "false"
+      N8N_EDITOR_BASE_URL: "${N8N_EDITOR_BASE_URL}"
+      WEBHOOK_URL: "${WEBHOOK_URL}"
+    networks:
+      - news4legends-control
+
+volumes:
+  news4legends_data:
+  news4legends_runtime:
+  n8n_data:
+
+networks:
+  news4legends-control:
+  news4legends-llm:
