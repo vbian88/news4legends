@@ -4,7 +4,17 @@
 
 News 4 Legends is a self-hosted v1 project; fixes target the latest published revision. Report vulnerabilities through **GitHub Private Vulnerability Reporting** in the repository's Security tab. Do not open a public issue containing an exploitable vulnerability, credentials, private URLs, or personal data. Include the affected revision, deployment context, reproduction steps, impact, and any proposed mitigation.
 
-Private Vulnerability Reporting can be enabled only after the GitHub repository exists. Immediately after repository creation, an owner must open **Settings → Security → Code security and analysis**, enable **Private vulnerability reporting**, and verify that the private reporting option appears in the Security tab before making the project public.
+Private Vulnerability Reporting is enabled for this repository.
+
+## Best-effort security information and disclaimer
+
+All security-related features, checks, classifications, alerts, dashboards, documentation, advisory links and remediation guidance supplied by News 4 Legends are provided on a **best-effort, informational basis only**. They may be incomplete, delayed, inaccurate, outdated or affected by differences in vendor data, version formats, deployment configuration and advisory metadata.
+
+A reported finding does not establish that a particular installation is exploitable. The absence of a finding, warning or alert does not establish that an installation is secure. News 4 Legends is not a substitute for professional security assessment, continuous monitoring, vendor support or independent review of the relevant official advisory.
+
+The software does not automatically apply security updates. The operator is responsible for securing the host and network, protecting credentials and backups, reviewing official advisories, determining whether findings apply, testing changes, maintaining recovery procedures and deciding whether or when to remediate.
+
+To the maximum extent permitted by applicable law, the software and all security-related information are provided **"AS IS" and "AS AVAILABLE", without warranty of any kind**, including any warranty that security checks will identify every vulnerability, correctly determine exploitability or prevent compromise, data loss, service interruption or other harm. The authors and contributors disclaim liability for losses or damages arising from use of, inability to use, or reliance on the software or its security-related output. This section supplements the [MIT License](LICENSE); it does not replace it and does not exclude any liability that cannot lawfully be excluded.
 
 ## Deployment boundary
 
