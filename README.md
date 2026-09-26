@@ -97,6 +97,8 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 
 News 4 Legends assumes private, trusted access. The UI and worker have no application authentication. Do not expose the UI, worker, or n8n directly to the Internet without TLS, authentication, and access controls. Secrets stay outside version control. Review [SECURITY.md](SECURITY.md).
 
+Security checks, classifications, alerts and guidance are best-effort information, not a guarantee of security or a substitute for professional assessment. A finding does not necessarily prove exploitability, and no findings does not mean a deployment is secure. See the full [security disclaimer](SECURITY.md#best-effort-security-information-and-disclaimer) and the MIT License's warranty and liability terms.
+
 Source credibility values are user-defined priority/importance weights, not objective truth scores.
 
 ## Repository structure
