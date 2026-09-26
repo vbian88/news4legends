@@ -61,6 +61,8 @@ tmp/
 # Logs
 *.log
 logs/
+run-logs/
+maintenance/reports/
 
 # Editors / OS
 .vscode/

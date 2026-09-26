@@ -1,5 +1,8 @@
 import json
+import os
 import subprocess
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from preflight import preflight
 from http.server import (
@@ -12,6 +15,47 @@ HOST = "0.0.0.0"
 PORT = 8080
 
 PROJECT_DIR = "/app"
+LOG_DIR = Path(os.environ.get("LOG_DIR", "/data/logs"))
+LOG_RETENTION_DAYS = int(os.environ.get("LOG_RETENTION_DAYS", "7"))
+
+
+def prune_run_logs():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=LOG_RETENTION_DAYS
+    )
+    for path in LOG_DIR.glob("run-*.txt"):
+        modified = datetime.fromtimestamp(
+            path.stat().st_mtime,
+            tz=timezone.utc,
+        )
+        if modified < cutoff:
+            path.unlink()
+
+
+def new_run_log():
+    prune_run_logs()
+    stamp = datetime.now(timezone.utc).strftime(
+        "%Y%m%dT%H%M%S.%fZ"
+    )
+    return LOG_DIR / f"run-{stamp}.txt"
+
+
+def write_run_log(path, message):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{timestamp}] {message.rstrip()}\n")
+
+
+def latest_run_log():
+    prune_run_logs()
+    logs = sorted(
+        LOG_DIR.glob("run-*.txt"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return logs[0] if logs else None
 
 
 
@@ -53,10 +97,28 @@ class RequestHandler(
                 {
                     "status": "ok",
                     "service": (
-                        "home-ai-news-worker"
+                        "news4legends-worker"
                     ),
                 },
             )
+            return
+
+        if self.path == "/logs":
+            path = latest_run_log()
+            if path is None:
+                self.send_json(404, {"error": "no run logs available"})
+                return
+
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{path.name}"',
+            )
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         self.send_json(
@@ -135,6 +197,11 @@ class RequestHandler(
             return
 
         if self.path == "/run":
+            log_path = new_run_log()
+            write_run_log(
+                log_path,
+                "News 4 Legends run started; mode=enabled_profiles",
+            )
             command = [
                 "python",
                 "orchestrator.py",
@@ -143,6 +210,7 @@ class RequestHandler(
             try:
                 result = self.run_command(command, 3600)
             except subprocess.TimeoutExpired:
+                write_run_log(log_path, "Run timed out after 3600 seconds")
                 self.send_json(
                     504,
                     {
@@ -153,6 +221,12 @@ class RequestHandler(
                 return
 
             if result.returncode != 0:
+                write_run_log(
+                    log_path,
+                    f"Run failed; return_code={result.returncode}",
+                )
+                if result.stderr.strip():
+                    write_run_log(log_path, result.stderr)
                 self.send_json(
                     500,
                     {
@@ -168,6 +242,12 @@ class RequestHandler(
                     result.stdout
                 )
             except json.JSONDecodeError as exc:
+                write_run_log(
+                    log_path,
+                    f"Invalid orchestrator output: {exc}",
+                )
+                if result.stderr.strip():
+                    write_run_log(log_path, result.stderr)
                 self.send_json(
                     500,
                     {
@@ -177,6 +257,14 @@ class RequestHandler(
                     },
                 )
                 return
+
+            if result.stderr.strip():
+                write_run_log(log_path, result.stderr)
+            write_run_log(
+                log_path,
+                "Run completed successfully; return_code=0; "
+                f"profiles_processed={delivery.get('profiles_processed', 0)}",
+            )
 
             self.send_json(
                 200,
@@ -228,7 +316,7 @@ def main():
     )
 
     print(
-        "home-ai-news-worker "
+        "news4legends-worker "
         f"listening on {HOST}:{PORT}"
     )
 

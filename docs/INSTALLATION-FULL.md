@@ -12,7 +12,7 @@ You need:
 - a stable LAN address or DHCP reservation
 - SSH access from an administrator laptop
 - an OpenAI-compatible chat-completions URL, model name, and API key
-- optional Telegram and/or Gmail accounts
+- optional SMTP email and/or Telegram delivery accounts
 
 Placeholders used below:
 
@@ -301,8 +301,8 @@ docker compose exec news4legends-worker python -c "import urllib.request; print(
 On a laptop, open `http://NEWS_SERVER_IP:8081`.
 
 1. Create a neutral test profile such as `Local News`.
-2. Set a unique slug, topic, keywords, and entities.
-3. Keep conservative budgets and a sensible maximum age.
+2. Set a unique slug, topic, optional keywords, and **Stories in digest** from 1–10.
+3. Keep a sensible maximum age; source workload budgets are configured when you add each source.
 4. Add a source name and its listing page URL (not an individual article URL).
 5. Set collector type `web`, user-defined source weight, and limits.
 6. Validate the source.
@@ -355,9 +355,9 @@ Import `n8n/workflow.example.json`. Verify the HTTP node exactly:
 - URL: `http://news4legends-worker:8080/run`
 - Authentication: none
 - Query parameters, headers, and body: off
-- Timeout: `360000` ms
+- Timeout: `3600000` ms (1 hour)
 
-Both delivery nodes are intentionally disabled. Configure [Telegram](TELEGRAM.md), [Gmail](GMAIL-OAUTH.md), or both. For Gmail use HTML mode and `{{ $json.email }}`; for Telegram use `{{ $json.telegram }}`.
+Both delivery nodes are intentionally disabled. Configure [Telegram](TELEGRAM.md), [SMTP email](SMTP.md), or both. For email use HTML mode and `{{ $json.email }}`; for Telegram use `{{ $json.telegram }}`.
 
 Execute the HTTP node manually.
 
@@ -369,20 +369,11 @@ Execute the HTTP node manually.
 
 Configure and manually test at least one delivery node. Then set the desired schedule and timezone, activate the workflow, and click **Publish**. An editor change is not guaranteed to affect scheduled execution until published.
 
-## 10. Gmail private-LAN OAuth bootstrap
+## 10. Configure SMTP email
 
-If using Gmail, follow the complete [Gmail OAuth guide](GMAIL-OAUTH.md). In summary:
+Follow the complete [SMTP email guide](SMTP.md). Create the SMTP credential inside n8n, configure an authorized From address and controlled recipient, set the email format to HTML, and use `{{ $json.email }}` as the HTML body. Keep the password or App Password inside n8n credentials; never put it in workflow JSON, `.env.example`, documentation or Git.
 
-1. Enable Gmail API in a Google Cloud project.
-2. Configure consent/branding and the minimum scope needed to send.
-3. Create a Web application OAuth client.
-4. Register `http://localhost:5678/rest/oauth2-credential/callback`.
-5. Temporarily set both n8n URLs in `.env` to `http://localhost:5678` (webhook URL ends `/`) and recreate n8n.
-6. From the laptop, create an example local tunnel: `ssh -L 5678:127.0.0.1:31002 ADMIN_USER@NEWS_SERVER_IP`.
-7. Complete OAuth at `http://localhost:5678`.
-8. Close the tunnel, restore normal LAN URLs, recreate n8n, and retest Gmail.
-
-The exact tunnel target depends on port publication. This command is a template, not a recovered historical command.
+Execute the email node manually and confirm delivery before enabling it. Then publish the workflow. Gmail OAuth and its localhost callback tunnel are not part of the current public delivery architecture.
 
 ## 11. Reboot acceptance test
 

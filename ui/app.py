@@ -6,7 +6,7 @@ import urllib.error
 
 from db_bootstrap import bootstrap_database
 from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 
 app = FastAPI(title="News 4 Legends")
@@ -18,9 +18,10 @@ bootstrap_database(DB_PATH)
 
 
 def get_db():
-    db = sqlite3.connect(DB_PATH)
+    db = sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
+    db.execute("PRAGMA busy_timeout = 30000")
     return db
 
 
@@ -479,6 +480,41 @@ def health():
     }
 
 
+@app.get("/logs/download")
+def download_latest_worker_log():
+    try:
+        with urllib.request.urlopen(
+            "http://news4legends-worker:8080/logs",
+            timeout=15,
+        ) as response:
+            content = response.read()
+            disposition = response.headers.get(
+                "Content-Disposition",
+                'attachment; filename="news4legends-worker-log.txt"',
+            )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return HTMLResponse(
+                "No worker run log is available yet.",
+                status_code=404,
+            )
+        return HTMLResponse(
+            "Worker log request failed.",
+            status_code=502,
+        )
+    except urllib.error.URLError:
+        return HTMLResponse(
+            "Worker log service is unavailable.",
+            status_code=502,
+        )
+
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": disposition},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     db = get_db()
@@ -548,6 +584,8 @@ def home():
           <a href="/new-profile">+ Add Profile</a>
           &nbsp;|&nbsp;
           <a href="/guide">📖 Zero-to-Hero Guide</a>
+          &nbsp;|&nbsp;
+          <a href="/logs/download">Download latest worker log</a>
         </p>
 
         {''.join(cards)}
@@ -690,8 +728,8 @@ def profile_view(profile_id: str):
         </form>
 
         <p>
-          Minimum source score:
-          <strong>{profile["minimum_source_score"]}</strong>
+          Stories in digest:
+          <strong>{profile["llm_limit"] or 3}</strong>
           &nbsp;|&nbsp;
           Maximum age:
           <strong>{profile["maximum_age_hours"]}h</strong>
@@ -736,7 +774,8 @@ def guide():
           <h3>1. Profile</h3>
           <p>
             A profile is a topic that News 4 Legends monitors.
-            Examples: AS Roma, Cybersecurity, Technology.
+            Examples: Cybersecurity, Artificial Intelligence,
+            Local News.
           </p>
           <p>
             Each profile has its own topic rules, sources,
@@ -753,8 +792,8 @@ def guide():
 
           <p>
             <strong>What am I interested in?</strong>
-            The Profile answers this with its Topic, optional
-            Keywords and optional Important Names.
+            The Profile answers this with its Topic and optional
+            Keywords.
           </p>
 
           <p>
@@ -773,8 +812,8 @@ def guide():
           </p>
 
           <p>
-            Topic is the foundation. Keywords and Important Names
-            enrich that definition; they do not replace it and they
+            Topic is the foundation. Keywords enrich that definition;
+            they do not replace it and they
             are not mandatory words that every article must contain.
           </p>
 
@@ -799,31 +838,36 @@ def guide():
             refinement.
           </p>
 
-          <p>
-            <strong>Entities</strong> are optional named subjects:
-            people, organisations, products, teams, characters,
-            locations or other specific names relevant to the profile.
-          </p>
-
           <div class="guidance warning">
             <strong>Important:</strong>
             Do not try to enumerate every possible relevant word.
-            Topic is always considered. Keywords and entities provide
-            additional signals. A missing keyword does not by itself
+            Topic is always considered. Keywords provide additional
+            signals. A missing keyword does not by itself
             reject an article if another profile signal identifies it
             as relevant.
           </div>
 
           <p>
-            Keywords and entities belong to the
-            <strong>profile</strong>, not individual sources.
+            Keywords belong to the <strong>profile</strong>, not
+            individual sources.
             Every source attached to that profile uses the same
             profile topic definition.
           </p>
         </div>
 
         <div class="card">
-          <h3>3. Source</h3>
+          <h3>3. Choose the Digest Size</h3>
+          <p>
+            <strong>Stories in digest</strong> requests between 1 and
+            10 prioritised stories. The effective result is bounded by
+            the configured LLM-call budget and the number of valid
+            clusters available. Asking for more stories does not
+            increase collection budgets automatically.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>4. Source</h3>
 
           <p>
             A source is a website, feed or provider from which
@@ -842,7 +886,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>4. Topic Focused vs Broad Sources</h3>
+          <h3>5. Topic Focused vs Broad Sources</h3>
 
           <p>
             <strong>Topic focused</strong> means the source mainly
@@ -859,7 +903,7 @@ def guide():
           <p>
             A <strong>broad source</strong> publishes many unrelated
             subjects. Those sources need stronger relevance checks
-            using the profile topic, keywords and entities to avoid
+            using the profile topic and relevance signals to avoid
             collecting unrelated articles.
           </p>
 
@@ -871,7 +915,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>5. Credibility score</h3>
+          <h3>6. Credibility score</h3>
 
           <p>
             This is a profile-specific weighting you control.
@@ -880,7 +924,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>6. Validate before enabling</h3>
+          <h3>7. Validate before enabling</h3>
 
           <p>
             Validation performs a bounded pre-flight check before a
@@ -903,7 +947,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>7. Workload budgets</h3>
+          <h3>8. Workload budgets</h3>
 
           <p>
             <strong>Candidate budget</strong> — maximum links
@@ -932,12 +976,12 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>8. Zero to Hero</h3>
+          <h3>9. Zero to Hero</h3>
 
           <ol>
             <li>Create a profile.</li>
             <li>Add meaningful keywords.</li>
-            <li>Add optional entities.</li>
+            <li>Choose 1–10 stories for the digest.</li>
             <li>Add a web source.</li>
             <li>Set conservative workload budgets.</li>
             <li>Validate the source.</li>
@@ -949,7 +993,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>9. Delete vs Disable</h3>
+          <h3>10. Delete vs Disable</h3>
 
           <p>
             <strong>Disable</strong> is reversible and should normally
@@ -964,7 +1008,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>10. What Happens When a Profile Runs?</h3>
+          <h3>11. What Happens When a Profile Runs?</h3>
 
           <ol>
             <li>The collector reads the enabled profile.</li>
@@ -990,7 +1034,7 @@ def guide():
         </div>
 
         <div class="card">
-          <h3>11. Production automation</h3>
+          <h3>12. Production automation</h3>
 
           <p>
             UI-created web sources can enter production without
@@ -1050,19 +1094,6 @@ def edit_profile(profile_id: str):
         ).fetchall()
     ]
 
-    entities = [
-        row["entity"]
-        for row in db.execute(
-            """
-            SELECT entity
-            FROM profile_entities
-            WHERE profile_id = ?
-            ORDER BY rowid
-            """,
-            (profile["id"],),
-        ).fetchall()
-    ]
-
     db.close()
 
     return page(f"""
@@ -1086,15 +1117,12 @@ def edit_profile(profile_id: str):
 
           <p>
             <strong>Topic</strong> is the main subject.
-            <strong>Extra Keywords</strong> add useful clues such as
-            synonyms, jargon and alternative terms.
-            <strong>Important Names</strong> add specific people,
-            organisations, products, teams, characters or places
-            that may help identify relevant stories.
+            <strong>Keywords</strong> add optional supporting clues
+            such as synonyms, jargon and alternative phrases.
           </p>
 
           <p>
-            These fields work together. Keywords and names
+            Topic and Keywords work together. Keywords
             <strong>enrich the Topic</strong>; they are not a list of
             words that every article must contain.
           </p>
@@ -1162,7 +1190,7 @@ def edit_profile(profile_id: str):
 
           <p>
             <label>
-              <strong>Extra keywords (optional)</strong><br>
+              <strong>Keywords (optional)</strong><br>
               <input name="keywords"
                      style="width:100%"
                      value="{html.escape(", ".join(keywords), quote=True)}">
@@ -1180,38 +1208,20 @@ def edit_profile(profile_id: str):
 
           <p>
             <label>
-              <strong>Important names (optional)</strong><br>
-              <input name="entities"
-                     style="width:100%"
-                     value="{html.escape(", ".join(entities), quote=True)}">
-            </label>
-            <br>
-            <small>
-              <strong>Optional specific relevance clues.</strong>
-              Add people, organisations, companies, products, teams,
-              characters or places that matter to this subject.
-              Finding one of these names can help the collector
-              recognise an article as relevant. Separate multiple
-              names with commas.
-            </small>
-          </p>
-
-          <p>
-            <label>
-              <strong>Minimum source score</strong><br>
+              <strong>Stories in digest</strong><br>
               <input type="number"
-                     name="minimum_source_score"
-                     min="0"
-                     max="100"
+                     name="llm_limit"
+                     min="1"
+                     max="10"
                      required
-                     value="{profile["minimum_source_score"]}">
+                     value="{profile["llm_limit"] or 3}">
             </label>
             <br>
             <small>
-              Source-quality threshold from 0 to 100.
-              A source relationship below this profile's threshold
-              should not contribute articles. Higher is stricter.
-              <strong>Leave 60 unless you have a reason to tune it.</strong>
+              Choose 1–10. The actual digest may contain fewer stories
+              when fewer valid clusters are available or a lower
+              configured LLM-call budget applies. Collection budgets
+              do not increase automatically.
             </small>
           </p>
 
@@ -1314,8 +1324,7 @@ def save_profile(
     name: str = Form(...),
     topic: str = Form(...),
     keywords: str = Form(""),
-    entities: str = Form(""),
-    minimum_source_score: int = Form(...),
+    llm_limit: int = Form(3),
     maximum_age_hours: int = Form(...),
     email_theme: str = Form("auto"),
     telegram_enabled: str | None = Form(None),
@@ -1340,17 +1349,10 @@ def save_profile(
         if value.strip()
     ]
 
-    entity_values = [
-        value.strip()
-        for value in entities.split(",")
-        if value.strip()
-    ]
-
     if (
         not name
         or not topic
-        or not keyword_values
-        or not 0 <= minimum_source_score <= 100
+        or not 1 <= llm_limit <= 10
         or maximum_age_hours < 1
         or email_theme not in valid_email_themes
     ):
@@ -1378,7 +1380,7 @@ def save_profile(
         UPDATE profiles
         SET name = ?,
             topic = ?,
-            minimum_source_score = ?,
+            llm_limit = ?,
             maximum_age_hours = ?,
             email_theme = ?,
             telegram_enabled = ?
@@ -1387,7 +1389,7 @@ def save_profile(
         (
             name,
             topic,
-            minimum_source_score,
+            llm_limit,
             maximum_age_hours,
             email_theme,
             1 if telegram_enabled else 0,
@@ -1398,14 +1400,6 @@ def save_profile(
     db.execute(
         """
         DELETE FROM profile_keywords
-        WHERE profile_id = ?
-        """,
-        (profile["id"],),
-    )
-
-    db.execute(
-        """
-        DELETE FROM profile_entities
         WHERE profile_id = ?
         """,
         (profile["id"],),
@@ -1422,20 +1416,6 @@ def save_profile(
         [
             (profile["id"], value)
             for value in keyword_values
-        ],
-    )
-
-    db.executemany(
-        """
-        INSERT INTO profile_entities (
-            profile_id,
-            entity
-        )
-        VALUES (?, ?)
-        """,
-        [
-            (profile["id"], value)
-            for value in entity_values
         ],
     )
 
@@ -1893,10 +1873,8 @@ def new_profile():
 
           <p>
             <strong>Topic</strong> is the main subject.
-            <strong>Extra Keywords</strong> enrich it with synonyms,
-            jargon and related phrases.
-            <strong>Important Names</strong> add specific people,
-            organisations, products, teams, characters or places.
+            <strong>Keywords</strong> optionally enrich it with
+            synonyms, jargon and related phrases.
           </p>
 
           <p>
@@ -1909,8 +1887,8 @@ def new_profile():
 
           <p>
             You do not need to predict every possible keyword.
-            Start with a clear Topic and add Keywords or Important
-            Names when they genuinely help describe what you want.
+            Start with a clear Topic and add Keywords when they
+            genuinely help describe what you want.
           </p>
         </div>
 
@@ -1948,7 +1926,7 @@ def new_profile():
 
           <p>
             <label>
-              <strong>Extra keywords (optional)</strong><br>
+              <strong>Keywords (optional)</strong><br>
               <input name="keywords"
                      style="width:100%"
                      placeholder="Optional: ransomware, vulnerability, zero-day">
@@ -1965,18 +1943,19 @@ def new_profile():
 
           <p>
             <label>
-              <strong>Important names (optional)</strong><br>
-              <input name="entities"
-                     style="width:100%"
-                     placeholder="Microsoft, CISA, CrowdStrike">
+              <strong>Stories in digest</strong><br>
+              <input type="number"
+                     name="llm_limit"
+                     min="1"
+                     max="10"
+                     required
+                     value="3">
             </label>
             <br>
             <small>
-              <strong>Optional.</strong>
-              Add specific people, organisations, companies, products,
-              teams, characters or places that strongly identify
-              relevant stories. Separate multiple names with commas.
-              Leave blank if you do not need this yet.
+              Choose 1–10. This controls the requested output size,
+              not the collection workload. Fewer stories may be
+              produced when fewer valid clusters are available.
             </small>
           </p>
 
@@ -2012,8 +1991,8 @@ def create_profile(
     name: str = Form(...),
     slug: str = Form(...),
     topic: str = Form(...),
-    keywords: str = Form(...),
-    entities: str = Form(""),
+    keywords: str = Form(""),
+    llm_limit: int = Form(3),
     telegram_enabled: str | None = Form(None),
 ):
     name = name.strip()
@@ -2026,16 +2005,11 @@ def create_profile(
         if value.strip()
     ]
 
-    entity_values = [
-        value.strip()
-        for value in entities.split(",")
-        if value.strip()
-    ]
-
     if (
         not name
         or not slug
         or not topic
+        or not 1 <= llm_limit <= 10
     ):
         return HTMLResponse(
             "Invalid profile",
@@ -2064,11 +2038,12 @@ def create_profile(
                 llm_limit,
                 telegram_enabled
             )
-            VALUES (?, ?, 0, ?, 60, 36, 0.5, 1, 3, ?)
+            VALUES (?, ?, 0, ?, 60, 36, 0.5, 1, ?, ?)
         """, (
             slug,
             name,
             topic,
+            llm_limit,
             1 if telegram_enabled else 0,
         ))
         profile_row = db.execute(
@@ -2089,20 +2064,6 @@ def create_profile(
             [
                 (profile_db_id, value)
                 for value in keyword_values
-            ],
-        )
-
-        db.executemany(
-            """
-            INSERT INTO profile_entities (
-                profile_id,
-                entity
-            )
-            VALUES (?, ?)
-            """,
-            [
-                (profile_db_id, value)
-                for value in entity_values
             ],
         )
 
@@ -2720,6 +2681,26 @@ def edit_source(
         if source["stop_after_consecutive_stale"] is not None
         else ""
     )
+    max_candidates_value = (
+        source["max_candidates"]
+        if source["max_candidates"] is not None
+        else 40
+    )
+    max_fetches_value = (
+        source["max_fetches"]
+        if source["max_fetches"] is not None
+        else 40
+    )
+    request_timeout_value = (
+        source["request_timeout_seconds"]
+        if source["request_timeout_seconds"] is not None
+        else 15
+    )
+    max_source_runtime_value = (
+        source["max_source_runtime_seconds"]
+        if source["max_source_runtime_seconds"] is not None
+        else 60
+    )
 
     collector_options = "".join(
         f'<option value="{value}"'
@@ -2786,7 +2767,7 @@ def edit_source(
                    type="number"
                    min="1"
                    required
-                   value="{source["max_candidates"]}">
+                   value="{max_candidates_value}">
           </label></p>
 
           <p><label>
@@ -2795,7 +2776,7 @@ def edit_source(
                    type="number"
                    min="1"
                    required
-                   value="{source["max_fetches"]}">
+                   value="{max_fetches_value}">
           </label></p>
 
           <p><label>
@@ -2805,7 +2786,7 @@ def edit_source(
                    min="1"
                    step="0.1"
                    required
-                   value="{source["request_timeout_seconds"]}">
+                   value="{request_timeout_value}">
           </label></p>
 
           <p><label>
@@ -2815,7 +2796,7 @@ def edit_source(
                    min="1"
                    step="0.1"
                    required
-                   value="{source["max_source_runtime_seconds"]}">
+                   value="{max_source_runtime_value}">
           </label></p>
 
           <p><label>

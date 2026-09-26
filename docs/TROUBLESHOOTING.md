@@ -36,7 +36,7 @@ docker compose logs --since=20m --timestamps --tail=200
 
 **Fastest check:** `docker top news4legends-worker -eo pid,ppid,etime,stat,cmd`.
 
-**Expected:** An orchestrator/collector/pipeline process with increasing elapsed time during a real run; completion inside n8n's 360000 ms timeout for normal workloads.
+**Expected:** An orchestrator/collector/pipeline process with increasing elapsed time during a real run; completion inside n8n's 3600000 ms timeout for normal workloads.
 
 **Likely causes:** slow/unresponsive sources, large budgets, LLM latency, or overlap. The worker itself allows up to 3600 seconds, longer than the n8n example timeout.
 
@@ -93,6 +93,16 @@ The client timeout is 120 seconds. Confirm gateway/provider health, URL, model a
 
 The pipeline is designed to catch per-story LLM failures and fall back rather than automatically destroy the multi-profile briefing. Inspect output and stderr. If the whole run failed, look for an error outside the per-story boundary or invalid final output.
 
+## All LLM synthesis attempts failed
+
+**Fastest check:** Inspect the worker response or latest run log for `Systemic LLM failure: all ... synthesis attempt(s) failed`.
+
+**Expected:** At least one attempted story synthesis succeeds. Individual failures may still use fallback output.
+
+**If you don't see it:** Verify the endpoint, model, credentials, quota, and provider availability. Do not treat a completely fallback-only run as a healthy LLM integration.
+
+**Don't continue until one controlled synthesis succeeds.**
+
 ## One profile fails
 
 Inspect orchestrator stderr for the slug and failing child command. Validate that profile and its sources independently. Current worker API returns 500 when the orchestrator exits non-zero; fix the profile/root cause rather than repeatedly scheduling it.
@@ -103,19 +113,15 @@ Inspect `telegram` from the HTTP node. It should be non-empty and normally withi
 
 ## Email missing
 
-Check n8n execution, Gmail node result, recipient/BCC, spam, OAuth credential, and account sending limits. A successful worker run does not prove delivery. Use a controlled recipient for testing.
+Check the n8n execution, SMTP node result, recipient/BCC, spam filtering, SMTP credential and account sending limits. A successful worker run does not prove delivery. Use a controlled recipient for testing.
 
-## Gmail sends plain text or visible HTML
+## Email sends plain text or visible HTML
 
-Set Resource `Message`, Operation `Send`, Email Type `HTML`, and Message `{{ $json.email }}`. Test manually, then Publish.
+Set the SMTP email node to HTML and use `{{ $json.email }}` as the HTML body. Test manually, then Publish.
 
-## OAuth callback failure
+## SMTP authentication or connection failure
 
-For `redirect_uri_mismatch`, compare the exact registered and displayed URI: `http://localhost:5678/rest/oauth2-credential/callback`. Confirm temporary localhost n8n URLs, the laptop tunnel, and that `http://localhost:5678` reaches the correct n8n. Check Google consent/test-user/scope settings for access denial. See [Gmail OAuth](GMAIL-OAUTH.md).
-
-## Gmail credential fails after working
-
-Check revocation, test-mode expiry, Google account security changes, deleted OAuth client, or lost n8n encryption state. Preserve the n8n volume. Reauthorize through the localhost tunnel if necessary; do not delete credentials/volume first.
+Verify the SMTP hostname, port, encryption mode, username and password/App Password against the provider's current instructions. Confirm the From address is permitted. Preserve the n8n volume and credential encryption state; do not delete credentials as a first troubleshooting step. See [SMTP email](SMTP.md).
 
 ## Schedule ran but no digest
 
@@ -128,6 +134,8 @@ This is a known operational trap. Publish the intended version, manually execute
 ## Docker logs look stale or show no child progress
 
 Use `--since` and timestamps. Worker subprocess output is captured and may appear only after completion; use `docker top` for live process state. Do not restart a healthy active worker merely because logs are quiet.
+
+Use the UI's **Download latest worker log** link for the newest retained run, or request `GET /logs` from inside the worker container. A 404 means no retained run log exists yet. Logs are kept for seven days by default and pruning occurs when the next run begins.
 
 ## UI changes are not reflected
 
@@ -148,4 +156,3 @@ Stop and preserve both original backup and failed target. Verify checksums, Git 
 ## Escalation evidence
 
 Collect versions, timestamps, service status, sanitized error text, affected profile/source, and exact step. Redact API keys, tokens, OAuth data, recipients, chat IDs, private URLs, database content, and full workflow exports before sharing.
-

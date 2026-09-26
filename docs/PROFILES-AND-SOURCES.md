@@ -6,8 +6,8 @@ The web UI and SQLite database form the News 4 Legends control plane. Do not con
 
 1. Create a profile with a unique name and slug.
 2. Describe the topic precisely.
-3. Add keywords and named entities that distinguish relevant coverage.
-4. Choose freshness, clustering, collection, and LLM budgets.
+3. Add keywords that distinguish relevant coverage.
+4. Choose the number of stories in the digest and the collection budgets.
 5. Add sources and validate each one.
 6. Enable acceptable sources.
 7. Enable the profile.
@@ -18,19 +18,20 @@ The next bodyless `/run` automatically discovers it. Disabling a profile exclude
 
 | Setting | Meaning |
 | --- | --- |
-| Minimum source score | Lowest user-defined weight accepted by the pipeline |
 | Maximum age | Oldest acceptable article |
 | Similarity threshold | Jaccard title-similarity threshold from 0 to 1; higher requires closer titles |
-| LLM enabled/limit | Whether and how many top stories receive synthesis |
+| Stories in digest | How many top stories receive synthesis and appear in the digest (1–10) |
 | Collection budgets | Caps for total time, requests, articles, and LLM calls |
 | Telegram enabled | Profile-level compact delivery rendering preference |
 | Email theme | Deterministic theme or explicit override |
 
 Use conservative limits first. Increase one budget at a time after observing a successful run.
 
-## Keywords and entities
+## Keywords and legacy entities
 
-Keywords are topic terms; entities are important names such as organizations, people, products, competitions, or locations. Prefer distinctive terms. Generic words create noise, while an excessively narrow set can eliminate relevant stories. Test changes with a controlled run.
+Keywords are the visible topic terms in the simplified profile editor. Prefer distinctive terms. Generic words create noise, while an excessively narrow set can eliminate relevant stories. Test changes with a controlled run.
+
+Existing `profile_entities` rows are retained for compatibility and remain available to the collector, but the simplified UI does not create, expose, overwrite, or delete them. Source weights and the profile's legacy minimum-score field are also preserved internally; source weight remains editable on each source.
 
 ## Source model
 
@@ -72,7 +73,7 @@ Themes include Auto, Burgundy & Gold, Navy & Cyan, Emerald, Purple, Orange, and 
 4. Adjust topic terms before increasing collection budgets.
 5. Tune maximum age.
 6. Tune similarity threshold if unrelated stories merge or duplicates remain split.
-7. Increase LLM limit only after collection quality is acceptable.
+7. Increase **Stories in digest** only after collection quality is acceptable.
 8. Add further profiles after the first behaves predictably.
 
 Avoid starting simultaneous manual runs; check `docker top news4legends-worker -eo pid,ppid,etime,stat,cmd` first.
@@ -80,4 +81,3 @@ Avoid starting simultaneous manual runs; check `docker top news4legends-worker -
 ## Data ownership and deletion
 
 Profile deletion cascades to its keyword, entity, and source relationships. A source name may still be used by another profile. Back up SQLite before large changes. See [Backup and restore](BACKUP-RESTORE.md).
-

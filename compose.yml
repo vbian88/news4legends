@@ -31,6 +31,8 @@ services:
       OMNIROUTE_API_URL: "${LLM_API_URL}"
       OMNIROUTE_MODEL: "${LLM_MODEL}"
       OMNIROUTE_API_KEY_FILE: "/run/secrets/llm_api_key"
+      LOG_DIR: "/data/logs"
+      LOG_RETENTION_DAYS: "7"
     networks:
       - news4legends-control
       - news4legends-llm

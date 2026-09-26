@@ -32,13 +32,23 @@ Do not start another expensive run while one is active. Overlap duplicates netwo
 
 ## Live progress and logs
 
-The worker API captures child stdout/stderr. Child progress may therefore not stream into `docker logs`. Use `docker top` for current processes and elapsed time. Worker API logs remain useful for request arrival and completed errors:
+The worker API captures child stdout/stderr. Child progress may therefore not stream into `docker logs`. Use `docker top` for current processes and elapsed time. Each run also creates a timestamped text log in the `news4legends_runtime` volume. Logs are retained for seven days by default and pruned when a new run starts.
+
+Download the latest retained run log from the UI's **Download latest worker log** link, or from inside the worker container:
+
+```bash
+docker compose exec news4legends-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/logs').read().decode())"
+```
+
+Docker service logs remain useful for request arrival and completed errors:
 
 ```bash
 docker compose logs --since=15m --timestamps news4legends-worker
 ```
 
 Always use a time boundary. An old traceback remaining in Docker logs is not evidence that the latest execution failed. Correlate timestamps with n8n execution start/end and current processes.
+
+Run logs contain operational diagnostics, including subprocess stderr, but not the rendered digest JSON. Treat them as private operational data and redact URLs, titles, identifiers, or provider messages before sharing.
 
 ## Controlled manual run
 
@@ -109,4 +119,3 @@ After host or Docker changes, reboot during a safe window and confirm services, 
 - Check secret permissions: `stat -c '%a %n' secrets/llm_api_key` should show `600`.
 - Back up and test restore regularly.
 - Never paste complete logs/executions publicly without redaction.
-

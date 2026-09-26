@@ -18,7 +18,7 @@ Configure the node exactly:
 | Query parameters | Off |
 | Headers | Off |
 | Body | Off |
-| Timeout | `360000` ms |
+| Timeout | `3600000` ms (1 hour) |
 
 `/run` is deliberately bodyless. Do not add a profile slug. The worker discovers all enabled profiles from SQLite.
 
@@ -34,7 +34,7 @@ Configure the node exactly:
 
 ## Delivery nodes
 
-For Gmail configure HTML message content as `{{ $json.email }}`. For Telegram use `{{ $json.telegram }}`. Enable either or both only after credentials and destination fields are set. One delivery bundle feeds both nodes; it does not repeat collection or synthesis.
+For SMTP email configure the HTML body as `{{ $json.email }}`. For Telegram use `{{ $json.telegram }}`. Enable either or both only after credentials and destination fields are set. One delivery bundle feeds both nodes; it does not repeat collection or synthesis. See [SMTP email](SMTP.md).
 
 ## Schedule, activation, and publication
 
@@ -61,4 +61,3 @@ Exports can contain recipients, BCC fields, chat IDs, URLs, pinned data, credent
 ## Updates and testing
 
 The Compose image currently uses the floating `n8nio/n8n:latest` tag. A routine `docker compose pull` can therefore introduce a new n8n version. Record the current image ID/version, back up first, and use [Upgrading](UPGRADING.md). For stricter reproducibility, choose and test a pinned n8n version before publication/deployment.
-

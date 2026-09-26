@@ -9,6 +9,6 @@ request:
   user_agent: "News4Legends/1.0 (+self-hosted personal intelligence briefing)"
 
 collection:
-  max_articles_per_source: 5
+  max_articles_per_source: 10
   max_candidates_per_source: 40
   minimum_text_characters: 400

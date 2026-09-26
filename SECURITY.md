@@ -24,7 +24,7 @@ Do not expose the UI, worker API, or n8n directly to the Internet. For remote ac
 
 ## Never publish
 
-- `.env`, LLM keys, bearer tokens, OAuth secrets/tokens, Gmail credentials, or Telegram tokens
+- `.env`, LLM keys, bearer tokens, SMTP credentials/App Passwords, OAuth remnants, or Telegram tokens
 - n8n credential records, encryption keys, or persistent state
 - production databases, SSH private keys, personal addresses/chat IDs, logs, runtime data, or backups
 

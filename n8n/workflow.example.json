@@ -36,7 +36,7 @@
             "response": {
               "response": {}
             },
-            "timeout": 360000
+            "timeout": 3600000
           },
           "sendQuery": false,
           "sendHeaders": false,
@@ -67,20 +67,20 @@
       },
       {
         "parameters": {
-          "sendTo": "YOUR_EMAIL@example.com",
+          "fromEmail": "YOUR_SENDER@example.com",
+          "toEmail": "YOUR_EMAIL@example.com",
           "subject": "News 4 Legends — Daily Intelligence Digest",
-          "message": "={{ $json.email }}",
-          "options": {
-            "bccList": ""
-          }
+          "emailFormat": "html",
+          "html": "={{ $json.email }}",
+          "options": {}
         },
-        "type": "n8n-nodes-base.gmail",
-        "typeVersion": 2.2,
+        "type": "n8n-nodes-base.emailSend",
+        "typeVersion": 2.1,
         "position": [
           368,
           -128
         ],
-        "name": "Send a message",
+        "name": "Send an Email",
                 "disabled": true
       }
     ],
@@ -100,7 +100,7 @@
         "main": [
           [
             {
-              "node": "Send a message",
+              "node": "Send an Email",
               "type": "main",
               "index": 0
             },
@@ -112,7 +112,7 @@
           ]
         ]
       },
-      "Send a message": {
+      "Send an Email": {
         "main": [
           []
         ]

@@ -59,3 +59,19 @@ If code/images changed but persistent schema/state did not, check out the record
 
 Document why rollback occurred. Do not repeatedly start a failing migration against the only database.
 
+## Manual security advisory or CVE remediation
+
+The public repository does not currently include an automated maintenance/CVE classifier. Handle an advisory as a controlled, backup-first upgrade:
+
+1. Read the vendor's official advisory and identify the affected component, branches, and fixed releases.
+2. Discover the version actually installed; do not rely on a version copied into documentation or a script.
+3. Compare the installed version and configuration with the advisory. Record the result as **confirmed affected**, **not affected**, or **uncertain**. Treat an unknown branch, vendor backport, or ambiguous version as uncertain rather than safe.
+4. Select an applicable fixed release on the supported branch. Do not assume the numerically newest release is compatible.
+5. Create the complete backup described in [Backup and restore](BACKUP-RESTORE.md). Confirm it is recent, non-zero, checksum-valid, and recoverable.
+6. Record the current Git revision, Compose configuration, container image IDs, and dynamically reported application versions.
+7. Read the release notes and migration instructions for every intervening release.
+8. Apply the smallest vendor-supported change. Pull or rebuild only the affected component, then recreate only what the upgrade requires.
+9. Verify container health, the installed version, SQLite integrity, profiles/sources, n8n state, one bodyless run, and each enabled delivery channel.
+10. Reassess the advisory against the newly discovered installed version. Retain the backup and prior image IDs until acceptance is complete.
+
+If any branch applicability, backport status, or fixed-version claim remains uncertain, stop and obtain vendor or qualified security review. A best-effort advisory assessment is not proof that a deployment is secure.

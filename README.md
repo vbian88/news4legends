@@ -12,13 +12,14 @@ The modern news cycle rewards volume: more feeds, alerts, tabs, and scrolling. N
 
 ## Features
 
-- Web UI for profiles, keywords, entities, sources, budgets, and delivery preferences.
+- Simplified web UI for profiles, keywords, story count, sources, budgets, and delivery preferences.
 - Persistent SQLite control plane.
 - Automatic discovery of enabled profiles; adding one needs no Python, cron, or n8n change.
 - Source preflight with `PASS`, `WARNING`, and `FAIL` results.
 - Bounded collection, freshness filtering, deduplication, clustering, and prioritization.
 - OpenAI-compatible chat-completions endpoint for synthesis.
 - One collection/synthesis run renders both email and Telegram.
+- Seven-day worker run logs, available from the UI or `GET /logs`.
 - n8n scheduling and delivery, with example delivery nodes disabled by default.
 - Private-server design; it is not hardened as a public Internet service.
 
@@ -42,7 +43,7 @@ The UI is the profile control plane. The automation layer never selects an indiv
 
 ## Requirements
 
-A comfortable small installation uses Debian 12, 2 vCPU, 4 GB RAM, 30–40 GB disk, Docker Engine with Compose, an OpenAI-compatible remote LLM endpoint, and optional Telegram/Gmail accounts. No GPU is required for remote inference. Actual needs depend on profile/source count and collection volume.
+A comfortable small installation uses Debian 12, 2 vCPU, 4 GB RAM, 30–40 GB disk, Docker Engine with Compose, an OpenAI-compatible remote LLM endpoint, and optional SMTP email and/or Telegram delivery. No GPU is required for remote inference. Actual needs depend on profile/source count and collection volume.
 
 ## Quick start
 
@@ -73,7 +74,7 @@ Open `http://NEWS_SERVER_IP:8081`, create a profile, add and validate a source, 
 
 | Mode | Nodes to enable | Expression |
 | --- | --- | --- |
-| Email | Gmail | `{{ $json.email }}` |
+| Email | SMTP | `{{ $json.email }}` |
 | Telegram | Telegram | `{{ $json.telegram }}` |
 | Both | Both | Both expressions |
 
@@ -86,7 +87,7 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 - [Profiles and sources](docs/PROFILES-AND-SOURCES.md)
 - [n8n](docs/N8N.md)
 - [Telegram](docs/TELEGRAM.md)
-- [Gmail and OAuth](docs/GMAIL-OAUTH.md)
+- [SMTP email](docs/SMTP.md)
 - [Operations](docs/OPERATIONS.md)
 - [Backup and restore](docs/BACKUP-RESTORE.md)
 - [Upgrading](docs/UPGRADING.md)
@@ -124,6 +125,7 @@ The UI writes `/data/home-ai-news.db`; the worker sees the same volume read-only
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Liveness |
+| `GET` | `/logs` | Download the latest retained worker run log |
 | `POST` | `/preflight` | Validate JSON `listing_url` |
 | `POST` | `/run` | Run all enabled profiles; no body |
 

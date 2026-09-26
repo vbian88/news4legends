@@ -15,7 +15,7 @@ flowchart TD
     P --> G["OpenAI-compatible gateway"]
     P --> B["Delivery bundle"]
     B --> N
-    N --> M["Gmail"]
+    N --> M["SMTP email"]
     N --> T["Telegram"]
 ```
 
@@ -40,7 +40,7 @@ flowchart TB
     N --> W
 ```
 
-The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker also receives `config/collector.yaml` and a read-only LLM secret mount. The worker has no host-published port; n8n reaches it by Compose service DNS.
+The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker stores seven-day run logs under `/data/logs` in `news4legends_runtime`. It also receives `config/collector.yaml` and a read-only LLM secret mount. The worker has no host-published port; n8n reaches it by Compose service DNS.
 
 `news4legends-control` links internal services. `news4legends-llm` isolates the worker's gateway-facing path and is useful when an LLM gateway joins that Docker network. An externally hosted endpoint is also supported if reachable from the worker.
 
@@ -48,7 +48,7 @@ The UI database path is `/data/home-ai-news.db`; the worker path is `/config/hom
 
 ```mermaid
 flowchart LR
-    A["Create profile"] --> B["Add keywords/entities"]
+    A["Create profile"] --> B["Set topic, keywords and story count"]
     B --> C["Add source"]
     C --> D["Validate source"]
     D --> E["Enable source/profile"]
@@ -106,30 +106,22 @@ Telegram is more compact. The orchestrator fairly shares an approximately 4,000-
 ```mermaid
 flowchart TD
     S["Schedule Trigger"] --> H["HTTP Request"]
-    H -->|"$json.email"| G["Gmail node"]
+    H -->|"$json.email"| G["SMTP email node"]
     H -->|"$json.telegram"| T["Telegram node"]
 ```
 
 Both example delivery nodes are disabled until credentials and destinations are configured. Changes intended for scheduled execution must be **Published**.
 
-## Gmail OAuth bootstrap
+## SMTP delivery boundary
 
-```mermaid
-flowchart LR
-    B["Laptop browser<br/>localhost:5678"] --> T["SSH local forward"]
-    T --> P["Server published n8n port"]
-    P --> N["n8n :5678"]
-    G["Google callback"] --> B
-```
-
-The tunnel is a one-time bootstrap for a localhost redirect, not the normal UI route or a permanent proxy. Restore normal LAN editor/webhook URLs afterward.
+n8n owns SMTP credentials and sends the worker's rendered `email` field. The worker never receives the SMTP password and does not perform a second collection or LLM pass for email. The public workflow contains placeholders and no credential binding.
 
 ## Failure boundaries
 
 - Invalid/unexpected SQLite schema stops bootstrap rather than mutating data.
 - Source validation is bounded and records `PASS`, `WARNING`, or `FAIL`.
 - Collection budgets constrain time, requests, fetches, and article counts.
-- An LLM HTTP/request failure raises an exception; per-story handling can fall back instead of terminating the whole multi-profile run.
+- A single LLM story failure can fall back without terminating the whole briefing; if every attempted synthesis fails, the pipeline raises a systemic failure instead of silently presenting a fully degraded result as success.
 - A profile subprocess failure is surfaced by the orchestrator/worker; inspect returned stderr.
 - Delivery failure in n8n does not repeat collection automatically unless workflow retry behavior is configured.
 - The worker captures child stdout/stderr, so live child progress may not appear in Docker logs; use `docker top`.
@@ -137,8 +129,8 @@ The tunnel is a one-time bootstrap for a localhost redirect, not the normal UI r
 ## API surface
 
 - `GET /health`
+- `GET /logs` (latest retained run log)
 - `POST /preflight` with a JSON `listing_url`
 - `POST /run` with no body
 
 Historical `/run-test`, `/run-roma`, and Roma-specific commands are deliberately absent.
-

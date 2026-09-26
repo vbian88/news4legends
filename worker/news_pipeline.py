@@ -533,6 +533,8 @@ def synthesize_clusters(
     )
 
     results = []
+    llm_attempts = 0
+    llm_failures = 0
 
     for number, cluster in enumerate(
         selected_clusters,
@@ -552,9 +554,11 @@ def synthesize_clusters(
         )
 
         try:
+            llm_attempts += 1
             result = ask_llm(prompt)
             summary = result.strip()
         except Exception as exc:
+            llm_failures += 1
             print(
                 f"LLM synthesis failed for story {number}: {exc}",
                 file=sys.stderr,
@@ -580,7 +584,13 @@ def synthesize_clusters(
                 f"Story {number} synthesis:"
             )
 
-            print(result)
+            print(summary)
+
+    if llm_attempts > 0 and llm_failures == llm_attempts:
+        raise RuntimeError(
+            "Systemic LLM failure: "
+            f"all {llm_attempts} synthesis attempt(s) failed"
+        )
 
     return results
 
@@ -1295,9 +1305,19 @@ def run_pipeline(
 
         return None, clusters
 
+    effective_llm_limit = args.llm_limit
+    max_llm_calls = profile.get("budgets", {}).get(
+        "max_llm_calls"
+    )
+    if max_llm_calls is not None:
+        effective_llm_limit = min(
+            effective_llm_limit,
+            max_llm_calls,
+        )
+
     syntheses = synthesize_clusters(
         clusters,
-        llm_limit=args.llm_limit,
+        llm_limit=effective_llm_limit,
         profile=profile,
         print_console_results=(
             not (
@@ -1358,9 +1378,12 @@ def main():
             "llm"
         ]["limit"]
 
-    if args.llm_limit is None or args.llm_limit < 1:
+    if (
+        args.llm_limit is None
+        or not 1 <= args.llm_limit <= 10
+    ):
         raise SystemExit(
-            "LLM limit must be at least 1"
+            "LLM limit must be between 1 and 10"
         )
 
     articles = load_articles(
