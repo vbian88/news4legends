@@ -404,7 +404,30 @@ Follow [Backup and restore](BACKUP-RESTORE.md). At minimum protect SQLite, the f
 
 For every output verify existence, non-zero size, recent timestamp, and checksum. Then perform the documented isolated restore drill. Backup archives contain credentials and are not automatically encrypted.
 
-## 13. Final acceptance checklist
+## 13. Configure maintenance and security reports
+
+**What you're doing:** Preparing ignored runtime directories and generating the first zero-LLM security report.
+
+**Command — server:**
+
+```bash
+cd /opt/news4legends
+cp maintenance/config.example.json maintenance/config.json
+mkdir -p maintenance/reports maintenance/state
+chmod 700 maintenance/reports maintenance/state
+./maintenance/run.sh manual
+docker compose up -d --build news4legends-ui
+```
+
+**What you should see:** The command ends with `ALERT=NO MODE=MANUAL`, `maintenance/reports/current.json` exists, and `http://NEWS_SERVER_IP:8081/security` displays the read-only report. Installed versions are discovered from running containers; they are not copied from this guide.
+
+**If you don't see it:** Read the `VERSION DISCOVERY ERRORS` section, confirm the configured container names and version commands, and verify that your account can run `docker exec`. A failed or ambiguous version check must remain visible; do not replace it with a guessed version.
+
+**Don't continue until a manual report is produced and the dashboard can read it.**
+
+Follow [Maintenance and security monitoring](MAINTENANCE-SECURITY.md) before enabling scheduled or weekly modes. No automatic upgrades are performed.
+
+## 14. Final acceptance checklist
 
 - [ ] Debian is updated and SSH works after reboot.
 - [ ] Docker Engine and Compose v2 pass verification.
@@ -419,6 +442,7 @@ For every output verify existence, non-zero size, recent timestamp, and checksum
 - [ ] State survives a reboot.
 - [ ] Backup files are non-empty, recent, checksummed, and access-restricted.
 - [ ] An isolated restore test has succeeded.
+- [ ] A manual maintenance report exists and the read-only Security dashboard loads.
 - [ ] UI, worker, and n8n are not directly exposed to the public Internet.
 
 The system is not accepted merely because containers are green: accept it only after a real briefing arrives through the chosen channel and a restore has been tested.

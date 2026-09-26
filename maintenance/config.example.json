@@ -1,0 +1,12 @@
+{
+  "services": {
+    "n8n": {
+      "enabled": true,
+      "repo": "n8n-io/n8n",
+      "container": "news4legends-n8n",
+      "version_command": ["n8n", "--version"],
+      "compose_dir": ".",
+      "docs": "https://docs.n8n.io/hosting/installation/docker/#updating"
+    }
+  }
+}

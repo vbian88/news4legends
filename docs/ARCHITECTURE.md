@@ -134,3 +134,7 @@ n8n owns SMTP credentials and sends the worker's rendered `email` field. The wor
 - `POST /run` with no body
 
 Historical `/run-test`, `/run-roma`, and Roma-specific commands are deliberately absent.
+
+## Maintenance/security boundary
+
+The host-run `maintenance/` scripts use no LLM. They dynamically query configured running containers for installed versions, obtain public advisories, classify confirmed matches or `UNCERTAIN` cases, and write runtime JSON/text under an ignored reports directory. Compose exposes only that report directory to the UI as a read-only mount. The dashboard cannot execute checks or upgrades.

@@ -61,7 +61,7 @@ Document why rollback occurred. Do not repeatedly start a failing migration agai
 
 ## Manual security advisory or CVE remediation
 
-The public repository does not currently include an automated maintenance/CVE classifier. Handle an advisory as a controlled, backup-first upgrade:
+The public repository includes a best-effort maintenance/CVE classifier, but it does not apply upgrades. Handle every reported advisory as a controlled, backup-first upgrade:
 
 1. Read the vendor's official advisory and identify the affected component, branches, and fixed releases.
 2. Discover the version actually installed; do not rely on a version copied into documentation or a script.

@@ -20,6 +20,9 @@ The modern news cycle rewards volume: more feeds, alerts, tabs, and scrolling. N
 - OpenAI-compatible chat-completions endpoint for synthesis.
 - One collection/synthesis run renders both email and Telegram.
 - Seven-day worker run logs, available from the UI or `GET /logs`.
+- Zero-LLM maintenance checks with dynamic version discovery, structured
+  current/history reports, branch-aware advisory classification, and a
+  read-only Security dashboard.
 - n8n scheduling and delivery, with example delivery nodes disabled by default.
 - Private-server design; it is not hardened as a public Internet service.
 
@@ -92,6 +95,7 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 - [Backup and restore](docs/BACKUP-RESTORE.md)
 - [Upgrading](docs/UPGRADING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Maintenance and security monitoring](docs/MAINTENANCE-SECURITY.md)
 - [Security](SECURITY.md)
 
 ## Security model
@@ -111,6 +115,7 @@ Source credibility values are user-defined priority/importance weights, not obje
 ├── docker/                     # Image definitions and requirements
 ├── docs/                       # Manuals
 ├── n8n/workflow.example.json   # Sanitized inactive workflow
+├── maintenance/                # Zero-LLM advisory checks and reports
 ├── ui/                         # Control plane and DB bootstrap
 ├── worker/                     # Collection and synthesis pipeline
 ├── secrets/                    # Local secret mount

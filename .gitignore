@@ -63,6 +63,8 @@ tmp/
 logs/
 run-logs/
 maintenance/reports/
+maintenance/state/
+maintenance/config.json
 
 # Editors / OS
 .vscode/

@@ -11,6 +11,9 @@ services:
       - "${NEWS4LEGENDS_UI_PORT:-8081}:8080"
     volumes:
       - news4legends_data:/data
+      - ${MAINTENANCE_REPORTS_DIR:-./maintenance/reports}:/security-reports:ro
+    environment:
+      NEWS4LEGENDS_SECURITY_REPORT_DIR: "/security-reports"
     networks:
       - news4legends-control
 

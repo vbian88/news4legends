@@ -119,3 +119,5 @@ After host or Docker changes, reboot during a safe window and confirm services, 
 - Check secret permissions: `stat -c '%a %n' secrets/llm_api_key` should show `600`.
 - Back up and test restore regularly.
 - Never paste complete logs/executions publicly without redaction.
+- Run `./maintenance/run.sh manual` after configuration changes and review the
+  read-only `/security` dashboard. See [Maintenance and security monitoring](MAINTENANCE-SECURITY.md).

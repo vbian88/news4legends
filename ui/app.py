@@ -1,6 +1,8 @@
 import html
 import json
+import os
 import sqlite3
+from pathlib import Path
 import urllib.request
 import urllib.error
 
@@ -13,6 +15,11 @@ app = FastAPI(title="News 4 Legends")
 
 
 DB_PATH = "/data/home-ai-news.db"
+SECURITY_REPORT_DIR = Path(
+    os.environ.get("NEWS4LEGENDS_SECURITY_REPORT_DIR", "/security-reports")
+)
+SECURITY_REPORT = SECURITY_REPORT_DIR / "current.json"
+SECURITY_HISTORY = SECURITY_REPORT_DIR / "history"
 
 bootstrap_database(DB_PATH)
 
@@ -515,6 +522,138 @@ def download_latest_worker_log():
     )
 
 
+@app.get("/security", response_class=HTMLResponse)
+def security_dashboard():
+    try:
+        data = json.loads(SECURITY_REPORT.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return page(
+            "<h2>Security</h2>"
+            "<p><a href='/'>← Profiles</a></p>"
+            "<div class='card'><strong>Security report unavailable.</strong><br>"
+            + html.escape(str(exc))
+            + "</div>"
+        )
+
+    counts = data.get("counts", {})
+    installed = data.get("installed", {})
+    findings = data.get("findings", [])
+    manual = data.get("manual_review", [])
+    discovery_errors = data.get("version_discovery_errors", [])
+    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    findings = sorted(
+        findings,
+        key=lambda item: (
+            severity_order.get(str(item.get("severity", "")).upper(), 9),
+            str(item.get("service", "")),
+            str(item.get("id", "")),
+        ),
+    )
+
+    cards = []
+    for finding in findings:
+        matches = "".join(
+            "<li>Affected: "
+            + html.escape(str(match.get("range", "")))
+            + " &nbsp;|&nbsp; Patched: "
+            + html.escape(str(match.get("patched", "not published")))
+            + "</li>"
+            for match in finding.get("matches", [])
+        )
+        advisory_url = str(finding.get("url", ""))
+        advisory_link = ""
+        if advisory_url.startswith("https://"):
+            advisory_link = (
+                "<p><a href='"
+                + html.escape(advisory_url, quote=True)
+                + "' target='_blank' rel='noopener noreferrer'>"
+                "Official project security advisory ↗</a></p>"
+            )
+        cards.append(
+            "<div class='card'>"
+            f"<h3>{html.escape(str(finding.get('severity', '')))}: "
+            f"{html.escape(str(finding.get('service', '')))} "
+            f"{html.escape(str(finding.get('installed', '')))}</h3>"
+            f"<p><strong>{html.escape(str(finding.get('id', '')))}</strong><br>"
+            f"{html.escape(str(finding.get('summary', '')))}</p>"
+            f"<ul>{matches}</ul>{advisory_link}"
+            "<small>Source: the official project's GitHub Security Advisory.</small>"
+            "</div>"
+        )
+
+    history_rows = []
+    if SECURITY_HISTORY.exists():
+        for history_path in sorted(
+            SECURITY_HISTORY.glob("*.json"), reverse=True
+        )[:20]:
+            try:
+                history = json.loads(
+                    history_path.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+            history_counts = history.get("counts", {})
+            history_rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(history.get('generated_at', '')))}</td>"
+                f"<td>{int(history_counts.get('critical', 0))}</td>"
+                f"<td>{int(history_counts.get('high', 0))}</td>"
+                f"<td>{int(history_counts.get('medium', 0))}</td>"
+                f"<td>{int(history_counts.get('low', 0))}</td>"
+                f"<td>{int(history_counts.get('uncertain', 0))}</td>"
+                f"<td>{int(history_counts.get('total', 0))}</td>"
+                "</tr>"
+            )
+
+    versions = "".join(
+        f"<li><strong>{html.escape(str(name))}</strong>: "
+        f"{html.escape(str(version))}</li>"
+        for name, version in installed.items()
+    )
+    manual_html = "".join(
+        f"<li>{html.escape(str(item))}</li>" for item in manual
+    )
+    discovery_html = "".join(
+        f"<li>{html.escape(str(item))}</li>" for item in discovery_errors
+    )
+
+    return page(f"""
+        <p><a href="/">← Profiles</a></p>
+        <h2>Security</h2>
+        <div class="card">
+          <h3>Current vulnerability status</h3>
+          <p><strong>Critical:</strong> {int(counts.get("critical", 0))}
+          &nbsp;|&nbsp; <strong>High:</strong> {int(counts.get("high", 0))}
+          &nbsp;|&nbsp; <strong>Medium:</strong> {int(counts.get("medium", 0))}
+          &nbsp;|&nbsp; <strong>Low:</strong> {int(counts.get("low", 0))}
+          &nbsp;|&nbsp; <strong>Manual review:</strong>
+          {int(counts.get("uncertain", 0))}</p>
+          <p>Last check: {html.escape(str(data.get("generated_at", "")))}</p>
+          <ul>{versions}</ul>
+        </div>
+        <div class="card">
+          <h3>Security notice</h3>
+          <p>This read-only dashboard provides best-effort vulnerability
+          information based on dynamically discovered installed versions and
+          public advisories. Results may be incomplete, delayed or inaccurate.
+          A finding does not prove exploitability, and no findings does not
+          prove the system is secure. Review the linked vendor advisory before
+          making changes. No automatic upgrades are performed.</p>
+        </div>
+        <h3>Findings</h3>
+        {''.join(cards) if cards else '<p>No confirmed findings.</p>'}
+        <h3>Needs manual review</h3>
+        <div class="card"><ul>{manual_html or '<li>None</li>'}</ul></div>
+        <h3>Version discovery errors</h3>
+        <div class="card"><ul>{discovery_html or '<li>None</li>'}</ul></div>
+        <h3>History</h3>
+        <div style="overflow-x:auto"><table><thead><tr>
+          <th>Check</th><th>Critical</th><th>High</th><th>Medium</th>
+          <th>Low</th><th>Review</th><th>Total</th>
+        </tr></thead><tbody>{''.join(history_rows)}</tbody></table></div>
+    """)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     db = get_db()
@@ -584,6 +723,8 @@ def home():
           <a href="/new-profile">+ Add Profile</a>
           &nbsp;|&nbsp;
           <a href="/guide">📖 Zero-to-Hero Guide</a>
+          &nbsp;|&nbsp;
+          <a href="/security">🛡 Security</a>
           &nbsp;|&nbsp;
           <a href="/logs/download">Download latest worker log</a>
         </p>
