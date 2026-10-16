@@ -12,7 +12,8 @@ The modern news cycle rewards volume: more feeds, alerts, tabs, and scrolling. N
 
 ## Features
 
-- Simplified web UI for profiles, keywords, story count, sources, budgets, and delivery preferences.
+- Authenticated multi-user web UI for profiles, sources, API access, health and security reporting.
+- Argon2 password hashing, administrator/contributor roles, profile assignments, CSRF protection and scoped API tokens.
 - Persistent SQLite control plane.
 - Automatic discovery of enabled profiles; adding one needs no Python, cron, or n8n change.
 - Source preflight with `PASS`, `WARNING`, and `FAIL` results.
@@ -56,12 +57,9 @@ For a blank server, follow the [full installation guide](docs/INSTALLATION-FULL.
 git clone https://github.com/vbian88/news4legends.git
 cd news4legends
 cp .env.example .env
-mkdir -p secrets
-printf '%s' 'PASTE_YOUR_LLM_API_KEY_HERE' > secrets/llm_api_key
-chmod 600 secrets/llm_api_key
 ```
 
-Edit `.env`, replacing every placeholder. Then:
+Edit `.env`, replacing every placeholder and setting `LLM_API_KEY` locally. Never commit `.env`. Then:
 
 ```bash
 docker compose config --quiet
@@ -69,6 +67,7 @@ docker compose up -d --build
 docker compose ps
 curl --fail http://127.0.0.1:8081/health
 docker compose exec news4legends-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').read().decode())"
+docker compose run --rm news4legends-ui python setup_admin.py
 ```
 
 Open `http://NEWS_SERVER_IP:8081`, create a profile, add and validate a source, and enable the profile. Import [`n8n/workflow.example.json`](n8n/workflow.example.json), configure a delivery channel, execute it manually, then activate and **Publish** the workflow.
@@ -96,11 +95,12 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 - [Upgrading](docs/UPGRADING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Maintenance and security monitoring](docs/MAINTENANCE-SECURITY.md)
+- [Authentication and management API](docs/AUTHENTICATION-API.md)
 - [Security](SECURITY.md)
 
 ## Security model
 
-News 4 Legends assumes private, trusted access. The UI and worker have no application authentication. Do not expose the UI, worker, or n8n directly to the Internet without TLS, authentication, and access controls. Secrets stay outside version control. Review [SECURITY.md](SECURITY.md).
+News 4 Legends provides UI authentication, role/profile authorization, CSRF protection and scoped management API tokens. It still assumes a private trusted network or a correctly configured HTTPS reverse proxy. The worker remains an internal service and must not be published directly. Secrets stay outside version control. Review [SECURITY.md](SECURITY.md).
 
 Security checks, classifications, alerts and guidance are best-effort information, not a guarantee of security or a substitute for professional assessment. A finding does not necessarily prove exploitability, and no findings does not mean a deployment is secure. See the full [security disclaimer](SECURITY.md#best-effort-security-information-and-disclaimer) and the MIT License's warranty and liability terms.
 
@@ -116,6 +116,9 @@ Source credibility values are user-defined priority/importance weights, not obje
 ├── docs/                       # Manuals
 ├── n8n/workflow.example.json   # Sanitized inactive workflow
 ├── maintenance/                # Zero-LLM advisory checks and reports
+├── health/                     # Portable host/service monitoring
+├── scripts/                    # Backup, restore, upgrade and API generation
+├── tests/                      # Database, authentication and integration tests
 ├── ui/                         # Control plane and DB bootstrap
 ├── worker/                     # Collection and synthesis pipeline
 ├── secrets/                    # Local secret mount
@@ -135,6 +138,8 @@ The UI writes `/data/home-ai-news.db`; the worker sees the same volume read-only
 | `POST` | `/run` | Run all enabled profiles; no body |
 
 Historical Roma-specific routes are not public API. Profiles and sources belong in SQLite through the UI, not in `collector.yaml` or the `/run` body.
+
+The authenticated management API is documented by the reproducible [OpenAPI contract](docs/openapi.json). Administrators can also download a PDF generated from the running contract.
 
 ## License
 

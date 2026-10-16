@@ -210,6 +210,7 @@ N8N_PORT=31002
 TZ=Europe/London
 LLM_API_URL=LLM_URL
 LLM_MODEL=LLM_MODEL_NAME
+LLM_API_KEY=PASTE_KEY_LOCALLY
 N8N_EDITOR_BASE_URL=http://NEWS_SERVER_IP:31002
 WEBHOOK_URL=http://NEWS_SERVER_IP:31002/
 ```
@@ -218,29 +219,26 @@ OmniRoute is a known working gateway but is not mandatory. The endpoint must acc
 
 **What you should see:** `grep -n 'NEWS_SERVER_IP\|LLM_URL\|LLM_MODEL_NAME' .env` returns nothing.
 
-**If you don't see it:** Reopen `.env` and replace every placeholder. Do not print the API key here; it belongs in the secret file.
+**If you don't see it:** Reopen `.env` and replace every placeholder. Do not print or commit the API key.
 
 **Don't continue until all placeholders are replaced.**
 
-### Create the LLM key file
+### Protect the local environment file
 
 **Command — server:**
 
 ```bash
-mkdir -p secrets
-read -rsp 'LLM API key: ' N4L_LLM_KEY; printf '\n'
-printf '%s' "$N4L_LLM_KEY" > secrets/llm_api_key
-unset N4L_LLM_KEY
-chmod 600 secrets/llm_api_key
-test -s secrets/llm_api_key
-stat -c '%a %n' secrets/llm_api_key
+chmod 600 .env
+test -s .env
+git check-ignore .env
+stat -c '%a %n' .env
 ```
 
-**What you should see:** `600 secrets/llm_api_key`; `test` prints nothing and exits successfully.
+**What you should see:** `.env` is ignored and has mode `600`.
 
-**If you don't see it:** Recreate the file without a trailing newline and correct its permissions.
+**If you don't see it:** Correct the permissions and confirm `.gitignore` excludes `.env`.
 
-**Don't continue until it is non-empty, mode 600, and excluded by `git check-ignore secrets/llm_api_key`.**
+**Don't continue until it is non-empty, mode 600, and excluded by Git.**
 
 ## 6. Validate and start the stack
 
@@ -274,13 +272,27 @@ print([r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='tabl
 PY
 ```
 
-**What you should see:** A healthy response, schema version `1`, and exactly `profile_entities`, `profile_keywords`, `profile_sources`, `profiles`, `sources`.
+**What you should see:** A healthy response, schema version `2`, the original control-plane tables and the authentication/API tables documented in [Architecture](ARCHITECTURE.md).
 
 **If you don't see it:** Read UI logs. The bootstrap deliberately refuses unexpected schemas instead of modifying them blindly.
 
 **Don't continue until schema version and table list are correct.**
 
 The UI path `/data/home-ai-news.db` and worker path `/config/home-ai-news.db` address the same Docker volume; the worker mount is read-only.
+
+### Create the first administrator
+
+**What you're doing:** Creating the only initial account interactively, without a default password or stored setup secret.
+
+```bash
+docker compose run --rm news4legends-ui python setup_admin.py
+```
+
+**What you should see:** `Administrator created. The password was not written to disk.`
+
+**If you don't see it:** Read the UI logs and verify the shared data volume is writable. If an administrator already exists, use `reset_admin.py` as described in troubleshooting.
+
+**Don't continue until you can sign in with the new administrator account.**
 
 ### Verify worker health
 
@@ -431,10 +443,11 @@ Follow [Maintenance and security monitoring](MAINTENANCE-SECURITY.md) before ena
 
 - [ ] Debian is updated and SSH works after reboot.
 - [ ] Docker Engine and Compose v2 pass verification.
-- [ ] `.env` has no placeholders; secret is non-empty and mode 600.
+- [ ] `.env` has no placeholders, contains the locally supplied LLM key, is ignored, and has mode 600.
 - [ ] Compose validates and three services stay running.
 - [ ] UI and worker health checks pass.
-- [ ] SQLite schema version is 1 with exactly five application tables.
+- [ ] SQLite schema version is 2; control-plane, authentication and API tables are present.
+- [ ] Administrator login, logout, CSRF checks and user management work.
 - [ ] At least one enabled profile has a validated, enabled source.
 - [ ] A bodyless `/run` processes the profile.
 - [ ] Chosen delivery channel succeeds manually.

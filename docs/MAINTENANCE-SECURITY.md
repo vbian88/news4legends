@@ -69,3 +69,23 @@ Reports and state are runtime data and are ignored by Git. They may reveal insta
 ## Manual remediation
 
 Follow the backup-first procedure in [Upgrading](UPGRADING.md). Confirm the installed version dynamically, validate that the advisory applies to the installed branch, verify a recent checksum-valid backup, record the current image ID, update one component, validate it, rerun `manual`, and retain the rollback path. Never convert these scripts into an automatic upgrader.
+
+## Optional malware and container scanning
+
+The repository also contains opt-in wrappers for ClamAV and Trivy. They do not install scanners, delete files, quarantine findings or upgrade images.
+
+| Variable | Purpose |
+| --- | --- |
+| `NEWS4LEGENDS_MAINTENANCE_ROOT` | Writable reports/state root; default `/var/lib/news4legends/maintenance` |
+| `N4L_CLAMAV_TARGETS` | Colon-separated scan roots; default `/app:/var/lib/news4legends` |
+| `N4L_HOST_LABEL` | Public-safe label used in alerts |
+| `N4L_TRIVY_IMAGE` | Scanner image; default `aquasec/trivy:latest` |
+| `N4L_SECURITY_WEBHOOK_URL` | Optional JSON webhook; an unset value causes a safe explicit skip |
+
+Run `maintenance/run_host_av.sh` or `maintenance/run_container_scan.sh` only after installing the relevant scanner and reviewing its privileges and target paths. Container scanning needs access to Docker and therefore carries elevated host risk. Schedule it from a dedicated operator context, not from the public UI.
+
+## Optional system health monitor
+
+`health/monitor.py` records bounded 30-day host/service samples and publishes `system-health.json` for the read-only dashboard. Paths, required containers, worker URL and backup signal are configured through `N4L_HEALTH_ROOT`, `N4L_REPORT_DIR`, `N4L_MONITORED_CONTAINERS`, `NEWS4LEGENDS_WORKER_URL` and `N4L_BACKUP_LOG`. Missing optional targets produce partial/unavailable signals instead of preventing the core UI and worker from starting.
+
+`health/alert_dispatcher.py` delivers only newly journaled incident transitions. Configure `N4L_HEALTH_WEBHOOK_URL`, `N4L_HEALTH_DASHBOARD_URL` and `TZ`; with no webhook it reports a skipped notification and does not claim delivery.

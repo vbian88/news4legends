@@ -23,6 +23,22 @@ git diff -- compose.yml .env.example ui/schema.sql docker
 
 Resolve local modifications rather than overwriting them. Then check out the reviewed revision and validate configuration:
 
+### v1 database migration
+
+The v2 UI automatically migrates a valid schema-v1 database inside a transaction. Take and verify the backup first; never rely on startup as your only recovery mechanism. For an explicit preflight migration while services are stopped:
+
+```bash
+docker compose stop news4legends-ui news4legends-worker
+mkdir -p ./backups
+PYTHONPATH=ui python3 scripts/upgrade_v1_to_v2.py /path/to/home-ai-news.db --backup-dir ./backups
+```
+
+**What you should see:** `Upgrade complete` with the path of a non-empty pre-v2 backup, followed by schema version 2 and `PRAGMA integrity_check` reporting `ok` when inspected.
+
+**If you don't see it:** Keep the services stopped, retain the error and restore the named pre-v2 copy. Do not rerun against the only database until the cause is understood.
+
+**Don't continue until the backup and upgraded database both pass integrity checks.**
+
 ```bash
 docker compose config --quiet
 python3 -m compileall -q ui worker
@@ -44,7 +60,7 @@ Verify, in order:
 
 1. UI health and browser rendering.
 2. Worker health.
-3. SQLite integrity, version, and five expected tables.
+3. SQLite integrity, schema version 2, and the documented application/authentication tables.
 4. Existing profiles/sources/settings.
 5. n8n login, workflow, credentials, timezone, activation, and Published version.
 6. One controlled bodyless run with no overlap.

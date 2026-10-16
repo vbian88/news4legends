@@ -6,22 +6,32 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
-from db_bootstrap import bootstrap_database
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from db_bootstrap import bootstrap_database
 
 
 app = FastAPI(title="News 4 Legends")
 
 
-DB_PATH = "/data/home-ai-news.db"
-SECURITY_REPORT_DIR = Path(
-    os.environ.get("NEWS4LEGENDS_SECURITY_REPORT_DIR", "/security-reports")
+
+app.mount(
+    "/static",
+    StaticFiles(directory=os.environ.get("NEWS4LEGENDS_STATIC_DIR", "/app/static"), check_dir=False),
+    name="static",
 )
-SECURITY_REPORT = SECURITY_REPORT_DIR / "current.json"
-SECURITY_HISTORY = SECURITY_REPORT_DIR / "history"
+
+DB_PATH = os.environ.get("NEWS4LEGENDS_DB_PATH", "/data/home-ai-news.db")
+WORKER_URL = os.environ.get("NEWS4LEGENDS_WORKER_URL", "http://news4legends-worker:8080").rstrip("/")
+REPORT_DIR = Path(os.environ.get("NEWS4LEGENDS_REPORT_DIR", "/security-reports"))
 
 bootstrap_database(DB_PATH)
+with sqlite3.connect(DB_PATH, timeout=30) as _db:
+    from api_tokens import initialize as _initialize_tokens
+    _initialize_tokens(_db)
+    _db.execute("DELETE FROM auth_sessions WHERE expires_at <= unixepoch()")
+    _db.commit()
 
 
 def get_db():
@@ -162,6 +172,21 @@ def page(body):
                 #650d1c,
                 #31070e
               );
+          }}
+
+          .ranieri-photo {{
+            width: 100%;
+            min-height: 310px;
+            display: block;
+            object-fit: cover;
+            object-position: center;
+            background:
+              linear-gradient(
+                135deg,
+                rgba(240,188,45,.15),
+                rgba(142,31,47,.25)
+              ),
+              #111;
           }}
 
           .passion-copy {{
@@ -412,6 +437,9 @@ def page(body):
               position: static;
             }}
 
+            .ranieri-photo {{
+              max-height: 520px;
+            }}
           }}
 
           @media (max-width: 600px) {{
@@ -449,6 +477,9 @@ def page(body):
           </section>
 
           <aside class="passion-panel">
+            <div class="ranieri-photo" role="img"
+                 aria-label="Burgundy and gold News 4 Legends presentation"></div>
+
             <div class="passion-copy">
               <h2>A Personal Passion</h2>
 
@@ -479,201 +510,237 @@ def page(body):
     """
 
 
+
+@app.exception_handler(404)
+async def custom_not_found(request: Request, exc):
+    body = """
+    <div style="text-align:center; padding:50px 12px;">
+      <h1 style="color:#ffd75c; font-size:3rem;">404</h1>
+      <h2>Page not found</h2>
+      <p>This page is missing, or you don't have permission to see it.</p>
+      <p><a href="/" style="color:#ffd75c;">Back to News 4 Legends</a></p>
+    </div>
+    """
+    return HTMLResponse(page(body), status_code=404)
+
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "service": "home-ai-news-ui",
+        "service": "news4legends-ui",
     }
 
 
 @app.get("/logs/download")
-def download_latest_worker_log():
+def download_logs():
     try:
-        with urllib.request.urlopen(
-            "http://news4legends-worker:8080/logs",
-            timeout=15,
-        ) as response:
-            content = response.read()
-            disposition = response.headers.get(
-                "Content-Disposition",
-                'attachment; filename="news4legends-worker-log.txt"',
-            )
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return HTMLResponse(
-                "No worker run log is available yet.",
-                status_code=404,
-            )
-        return HTMLResponse(
-            "Worker log request failed.",
-            status_code=502,
+        request = urllib.request.Request(
+            WORKER_URL + "/logs",
+            method="GET",
         )
-    except urllib.error.URLError:
+        with urllib.request.urlopen(
+            request,
+            timeout=30,
+        ) as response:
+            body = response.read()
+    except (urllib.error.URLError, TimeoutError) as exc:
         return HTMLResponse(
-            "Worker log service is unavailable.",
+            "Unable to retrieve worker logs: "
+            + html.escape(str(exc)),
             status_code=502,
         )
 
     return Response(
-        content=content,
+        content=body,
         media_type="text/plain",
-        headers={"Content-Disposition": disposition},
+        headers={
+            "Content-Disposition": (
+                "attachment; "
+                "filename=news4legends-logs.txt"
+            )
+        },
     )
+
+
+
+SECURITY_REPORT = REPORT_DIR / "current.json"
+SECURITY_HISTORY = REPORT_DIR / "history"
 
 
 @app.get("/security", response_class=HTMLResponse)
 def security_dashboard():
     try:
-        data = json.loads(SECURITY_REPORT.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = json.loads(SECURITY_REPORT.read_text())
+    except Exception as exc:
         return page(
             "<h2>Security</h2>"
             "<p><a href='/'>← Profiles</a></p>"
             "<div class='card'><strong>Security report unavailable.</strong><br>"
-            + html.escape(str(exc))
-            + "</div>"
+            + html.escape(str(exc)) + "</div>"
         )
 
     counts = data.get("counts", {})
     installed = data.get("installed", {})
     findings = data.get("findings", [])
     manual = data.get("manual_review", [])
-    discovery_errors = data.get("version_discovery_errors", [])
+
     severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     findings = sorted(
         findings,
-        key=lambda item: (
-            severity_order.get(str(item.get("severity", "")).upper(), 9),
-            str(item.get("service", "")),
-            str(item.get("id", "")),
+        key=lambda x: (
+            severity_order.get(x.get("severity", ""), 9),
+            x.get("service", ""),
+            x.get("id", ""),
         ),
     )
 
     cards = []
-    for finding in findings:
+    for f in findings:
         matches = "".join(
             "<li>Affected: "
-            + html.escape(str(match.get("range", "")))
+            + html.escape(str(m.get("range", "")))
             + " &nbsp;|&nbsp; Patched: "
-            + html.escape(str(match.get("patched", "not published")))
+            + html.escape(str(m.get("patched", "not published")))
             + "</li>"
-            for match in finding.get("matches", [])
+            for m in f.get("matches", [])
         )
-        advisory_url = str(finding.get("url", ""))
-        advisory_link = ""
-        if advisory_url.startswith("https://"):
-            advisory_link = (
-                "<p><a href='"
-                + html.escape(advisory_url, quote=True)
-                + "' target='_blank' rel='noopener noreferrer'>"
-                "Official project security advisory ↗</a></p>"
-            )
+        url = html.escape(str(f.get("url", "")), quote=True)
         cards.append(
             "<div class='card'>"
-            f"<h3>{html.escape(str(finding.get('severity', '')))}: "
-            f"{html.escape(str(finding.get('service', '')))} "
-            f"{html.escape(str(finding.get('installed', '')))}</h3>"
-            f"<p><strong>{html.escape(str(finding.get('id', '')))}</strong><br>"
-            f"{html.escape(str(finding.get('summary', '')))}</p>"
-            f"<ul>{matches}</ul>{advisory_link}"
-            "<small>Source: the official project's GitHub Security Advisory.</small>"
+            f"<h3>{html.escape(f.get('severity',''))}: "
+            f"{html.escape(f.get('service',''))} "
+            f"{html.escape(f.get('installed',''))}</h3>"
+            f"<p><strong>{html.escape(f.get('id',''))}</strong><br>"
+            f"{html.escape(f.get('summary',''))}</p>"
+            f"<ul>{matches}</ul>"
+            f"<p><a href='{url}' target='_blank' rel='noopener noreferrer'>"
+            "Official project security advisory ↗</a></p>"
+            "<small>Source: GitHub Security Advisory published by the "
+            "official project repository.</small>"
             "</div>"
         )
 
     history_rows = []
     if SECURITY_HISTORY.exists():
-        for history_path in sorted(
-            SECURITY_HISTORY.glob("*.json"), reverse=True
-        )[:20]:
+        for hp in sorted(SECURITY_HISTORY.glob("*.json"), reverse=True)[:20]:
             try:
-                history = json.loads(
-                    history_path.read_text(encoding="utf-8")
+                h=json.loads(hp.read_text())
+                c=h.get("counts", {})
+                history_rows.append(
+                    "<tr>"
+                    f"<td>{html.escape(str(h.get('generated_at','')))}</td>"
+                    f"<td>{c.get('critical',0)}</td>"
+                    f"<td>{c.get('high',0)}</td>"
+                    f"<td>{c.get('medium',0)}</td>"
+                    f"<td>{c.get('low',0)}</td>"
+                    f"<td>{c.get('uncertain',0)}</td>"
+                    f"<td>{c.get('total',0)}</td>"
+                    "</tr>"
                 )
-            except (OSError, json.JSONDecodeError):
+            except Exception:
                 continue
-            history_counts = history.get("counts", {})
-            history_rows.append(
-                "<tr>"
-                f"<td>{html.escape(str(history.get('generated_at', '')))}</td>"
-                f"<td>{int(history_counts.get('critical', 0))}</td>"
-                f"<td>{int(history_counts.get('high', 0))}</td>"
-                f"<td>{int(history_counts.get('medium', 0))}</td>"
-                f"<td>{int(history_counts.get('low', 0))}</td>"
-                f"<td>{int(history_counts.get('uncertain', 0))}</td>"
-                f"<td>{int(history_counts.get('total', 0))}</td>"
-                "</tr>"
-            )
 
     versions = "".join(
-        f"<li><strong>{html.escape(str(name))}</strong>: "
-        f"{html.escape(str(version))}</li>"
-        for name, version in installed.items()
-    )
-    manual_html = "".join(
-        f"<li>{html.escape(str(item))}</li>" for item in manual
-    )
-    discovery_html = "".join(
-        f"<li>{html.escape(str(item))}</li>" for item in discovery_errors
+        f"<li><strong>{html.escape(k)}</strong>: {html.escape(str(v))}</li>"
+        for k,v in installed.items()
     )
 
-    return page(f"""
+    manual_html = "".join(
+        f"<li>{html.escape(str(x))}</li>" for x in manual
+    )
+
+    return page(
+        f"""
         <p><a href="/">← Profiles</a></p>
         <h2>Security</h2>
+
         <div class="card">
           <h3>Current vulnerability status</h3>
-          <p><strong>Critical:</strong> {int(counts.get("critical", 0))}
-          &nbsp;|&nbsp; <strong>High:</strong> {int(counts.get("high", 0))}
-          &nbsp;|&nbsp; <strong>Medium:</strong> {int(counts.get("medium", 0))}
-          &nbsp;|&nbsp; <strong>Low:</strong> {int(counts.get("low", 0))}
-          &nbsp;|&nbsp; <strong>Manual review:</strong>
-          {int(counts.get("uncertain", 0))}</p>
-          <p>Last check: {html.escape(str(data.get("generated_at", "")))}</p>
+          <p>
+            <strong>Critical:</strong> {counts.get("critical",0)}
+            &nbsp;|&nbsp;
+            <strong>High:</strong> {counts.get("high",0)}
+            &nbsp;|&nbsp;
+            <strong>Medium:</strong> {counts.get("medium",0)}
+            &nbsp;|&nbsp;
+            <strong>Low:</strong> {counts.get("low",0)}
+            &nbsp;|&nbsp;
+            <strong>Manual review:</strong> {counts.get("uncertain",0)}
+          </p>
+          <p>Last check: {html.escape(str(data.get("generated_at","")))}</p>
           <ul>{versions}</ul>
         </div>
+
         <div class="card">
           <h3>Security notice</h3>
-          <p>This read-only dashboard provides best-effort vulnerability
-          information based on dynamically discovered installed versions and
-          public advisories. Results may be incomplete, delayed or inaccurate.
-          A finding does not prove exploitability, and no findings does not
-          prove the system is secure. Review the linked vendor advisory before
-          making changes. No automatic upgrades are performed.</p>
+          <p>
+            This dashboard provides best-effort vulnerability monitoring
+            based on installed-version detection and publicly available
+            security advisories. Results may be incomplete, delayed,
+            inaccurate, or affected by differences in vendor advisory
+            formats and version metadata. A finding does not necessarily
+            mean the system is exploitable, and the absence of findings
+            does not mean the system is secure. Review the linked vendor
+            advisory and validate applicability before making changes.
+            This tool does not automatically apply security updates.
+          </p>
         </div>
+
         <h3>Findings</h3>
         {''.join(cards) if cards else '<p>No confirmed findings.</p>'}
+
         <h3>Needs manual review</h3>
-        <div class="card"><ul>{manual_html or '<li>None</li>'}</ul></div>
-        <h3>Version discovery errors</h3>
-        <div class="card"><ul>{discovery_html or '<li>None</li>'}</ul></div>
+        <div class="card">
+          <ul>{manual_html or '<li>None</li>'}</ul>
+        </div>
+
         <h3>History</h3>
-        <div style="overflow-x:auto"><table><thead><tr>
-          <th>Check</th><th>Critical</th><th>High</th><th>Medium</th>
-          <th>Low</th><th>Review</th><th>Total</th>
-        </tr></thead><tbody>{''.join(history_rows)}</tbody></table></div>
-    """)
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Check</th><th>Critical</th><th>High</th>
+                <th>Medium</th><th>Low</th><th>Review</th><th>Total</th>
+              </tr>
+            </thead>
+            <tbody>{''.join(history_rows)}</tbody>
+          </table>
+        </div>
+        """
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
-def home():
+def home(request: Request):
+    from access import visible_profiles
+
+    user = request.state.auth_user
     db = get_db()
+    try:
+        allowed = visible_profiles(db, user)
+        ids = [p["id"] for p in allowed]
 
-    profiles = db.execute("""
-        SELECT
-            p.slug,
-            p.name,
-            p.enabled,
-            p.telegram_enabled,
-            COUNT(ps.id) AS source_count,
-            COALESCE(SUM(ps.enabled), 0) AS enabled_count
-        FROM profiles p
-        LEFT JOIN profile_sources ps
-            ON ps.profile_id = p.id
-        GROUP BY p.id
-        ORDER BY p.name
-    """).fetchall()
-
-    db.close()
+        profiles = []
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            profiles = db.execute(f"""
+                SELECT
+                    p.slug,
+                    p.name,
+                    p.enabled,
+                    p.telegram_enabled,
+                    COUNT(ps.id) AS source_count,
+                    COALESCE(SUM(ps.enabled), 0) AS enabled_count
+                FROM profiles p
+                LEFT JOIN profile_sources ps
+                    ON ps.profile_id = p.id
+                WHERE p.id IN ({placeholders})
+                GROUP BY p.id
+                ORDER BY p.name
+            """, ids).fetchall()
+    finally:
+        db.close()
 
     cards = []
 
@@ -726,7 +793,23 @@ def home():
           &nbsp;|&nbsp;
           <a href="/security">🛡 Security</a>
           &nbsp;|&nbsp;
-          <a href="/logs/download">Download latest worker log</a>
+          <a href="/system-health">📊 System Health</a>
+          &nbsp;|&nbsp;
+          <a href="/users">👥 User Management</a>
+          <a href="/api-management">🔑 API Management</a>
+          &nbsp;|&nbsp;
+          <form method="post" action="/logout" style="display:inline;margin:0">
+            <button type="submit" style="background:none;border:0;padding:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit">
+              Log out
+            </button>
+          </form>
+          &nbsp;|&nbsp;
+          <a href="/logs/download">Download logs (.txt)</a>
+        </p>
+
+        <p style="font-size:0.9em;color:#666">
+          Worker logs are stored in the configured persistent log volume.
+          &nbsp;·&nbsp; retained for 7 days
         </p>
 
         {''.join(cards)}
@@ -869,8 +952,7 @@ def profile_view(profile_id: str):
         </form>
 
         <p>
-          Stories in digest:
-          <strong>{profile["llm_limit"] or 3}</strong>
+
           &nbsp;|&nbsp;
           Maximum age:
           <strong>{profile["maximum_age_hours"]}h</strong>
@@ -908,291 +990,102 @@ def profile_view(profile_id: str):
 def guide():
     return page("""
         <p><a href="/">← Profiles</a></p>
-
         <h2>Zero-to-Hero Guide</h2>
 
         <div class="card">
-          <h3>1. Profile</h3>
-          <p>
-            A profile is a topic that News 4 Legends monitors.
-            Examples: Cybersecurity, Artificial Intelligence,
-            Local News.
-          </p>
-          <p>
-            Each profile has its own topic rules, sources,
-            freshness settings and workload limits.
-          </p>
+          <h3>1. Create a Profile</h3>
+          <p>A profile is a topic that News 4 Legends monitors.</p>
+          <p><strong>What this is about</strong> is the main description of what you want to follow.</p>
         </div>
 
         <div class="card">
-          <h3>2. Tell News 4 Legends What to Look For</h3>
-
-          <p>
-            There are two separate questions:
-          </p>
-
-          <p>
-            <strong>What am I interested in?</strong>
-            The Profile answers this with its Topic and optional
-            Keywords.
-          </p>
-
-          <p>
-            <strong>Where should News 4 Legends look?</strong>
-            Sources answer this. You add those after creating the
-            profile.
-          </p>
-
-          <p>
-            When the profile runs, the basic flow is:
-            <strong>
-              discover possible articles → identify promising
-              material → fetch it → check relevance and freshness →
-              keep useful articles → build the digest.
-            </strong>
-          </p>
-
-          <p>
-            Topic is the foundation. Keywords enrich that definition;
-            they do not replace it and they
-            are not mandatory words that every article must contain.
-          </p>
-
-          <p>
-            <strong>Topic</strong> describes what the whole profile
-            is about. Example: "Cybersecurity" or "The Smurfs".
-          </p>
-
-          <p>
-            <strong>Keywords are optional.</strong> They are
-            profile-wide relevance hints that you control. Topic is
-            the primary definition of the profile. Keywords add useful
-            synonyms, terminology and phrases but are not a mandatory
-            allow-list.
-          </p>
-
-          <p>
-            Examples include alternative names, important
-            terminology, recurring subjects or phrases strongly
-            associated with the topic. It is perfectly valid to leave
-            Keywords empty and add them later if collection needs
-            refinement.
-          </p>
-
+          <h3>2. Add Keywords — Only If Useful</h3>
+          <p><strong>Keywords are optional.</strong> They provide extra clues such as alternative names, terminology or recurring phrases.</p>
+          <p>The topic remains the primary definition. You do not need to enumerate every possible relevant word.</p>
           <div class="guidance warning">
-            <strong>Important:</strong>
-            Do not try to enumerate every possible relevant word.
-            Topic is always considered. Keywords provide additional
-            signals. A missing keyword does not by itself
-            reject an article if another profile signal identifies it
-            as relevant.
+            Start simple. Leave Keywords empty if the topic already describes what you want, and add them later only when collection needs refinement.
           </div>
-
-          <p>
-            Keywords belong to the <strong>profile</strong>, not
-            individual sources.
-            Every source attached to that profile uses the same
-            profile topic definition.
-          </p>
         </div>
 
         <div class="card">
-          <h3>3. Choose the Digest Size</h3>
-          <p>
-            <strong>Stories in digest</strong> requests between 1 and
-            10 prioritised stories. The effective result is bounded by
-            the configured LLM-call budget and the number of valid
-            clusters available. Asking for more stories does not
-            increase collection budgets automatically.
-          </p>
+          <h3>3. Choose Stories in Digest</h3>
+          <p><strong>Stories in digest</strong> controls how many stories News 4 Legends aims to synthesise for this profile.</p>
+          <p>Choose from 1 to 10. The default is 3. If fewer suitable stories are available, the digest may contain fewer.</p>
+          <p>Asking for more digest stories does not automatically increase collection workload.</p>
         </div>
 
         <div class="card">
-          <h3>4. Source</h3>
-
-          <p>
-            A source is a website, feed or provider from which
-            candidate articles are discovered.
-          </p>
-
-          <p>
-            Production discovery currently supports
-            <strong>web</strong> sources.
-          </p>
-
-          <p>
-            FreshRSS and social are planned ingestion types and
-            should not yet be treated as production-ready.
-          </p>
+          <h3>4. Add Sources</h3>
+          <p>A source is a website, feed or provider from which candidate articles are discovered.</p>
+          <p>Production discovery currently supports <strong>web</strong> sources. FreshRSS and social are planned ingestion types.</p>
         </div>
 
         <div class="card">
           <h3>5. Topic Focused vs Broad Sources</h3>
-
-          <p>
-            <strong>Topic focused</strong> means the source mainly
-            publishes material about this profile's subject.
-            Examples include an official project site, specialist
-            publication, team site or dedicated topic site.
-          </p>
-
-          <p>
-            Because most of its content is already relevant, the
-            generic collector can use less aggressive topic filtering.
-          </p>
-
-          <p>
-            A <strong>broad source</strong> publishes many unrelated
-            subjects. Those sources need stronger relevance checks
-            using the profile topic and relevance signals to avoid
-            collecting unrelated articles.
-          </p>
-
+          <p><strong>Topic focused</strong> means the source mainly publishes material about the profile subject.</p>
+          <p>A <strong>broad source</strong> publishes many unrelated subjects, so stronger relevance checks are required.</p>
           <div class="guidance warning">
-            Do not mark a broad news site as Topic Focused simply to
-            collect more articles. That would weaken an important
-            relevance guardrail.
+            Do not mark a broad source as Topic Focused simply to collect more articles. That weakens an important relevance guardrail.
           </div>
         </div>
 
         <div class="card">
-          <h3>6. Credibility score</h3>
-
-          <p>
-            This is a profile-specific weighting you control.
-            It is not an objective or global rating of a source.
-          </p>
+          <h3>6. Set Source Limits</h3>
+          <p><strong>Candidate budget</strong> limits links considered from the listing page.</p>
+          <p><strong>Fetch budget</strong> limits article pages fetched.</p>
+          <p><strong>Request timeout</strong> limits an individual HTTP request.</p>
+          <p><strong>Source runtime</strong> limits total work on one source.</p>
+          <p>Start conservatively and increase limits only when monitoring shows useful material is being missed.</p>
         </div>
 
         <div class="card">
-          <h3>7. Validate before enabling</h3>
-
-          <p>
-            Validation performs a bounded pre-flight check before a
-            source is admitted into production.
-          </p>
-
-          <p>
-            <strong>PASS</strong> — sampled collection worked.
-          </p>
-
-          <p>
-            <strong>WARNING</strong> — source may be usable, but
-            review the reported limitation or workload.
-          </p>
-
-          <p>
-            <strong>FAIL</strong> — leave the source disabled,
-            correct the problem and validate again.
-          </p>
+          <h3>7. Validate Before Enabling</h3>
+          <p>Validation performs a bounded pre-flight check before a source is admitted into production.</p>
+          <p><strong>PASS</strong> — sampled collection worked.</p>
+          <p><strong>WARNING</strong> — review the reported limitation or workload.</p>
+          <p><strong>FAIL</strong> — leave the source disabled, correct the problem and validate again.</p>
         </div>
 
         <div class="card">
-          <h3>8. Workload budgets</h3>
-
-          <p>
-            <strong>Candidate budget</strong> — maximum links
-            considered from the listing page.
-          </p>
-
-          <p>
-            <strong>Fetch budget</strong> — maximum article pages
-            fetched from the source.
-          </p>
-
-          <p>
-            <strong>Request timeout</strong> — maximum time to wait
-            for an individual HTTP request.
-          </p>
-
-          <p>
-            <strong>Source runtime</strong> — wall-clock guardrail
-            for work performed on one source.
-          </p>
-
-          <p>
-            Start conservatively. Increase limits only when
-            monitoring shows useful material is being missed.
-          </p>
+          <h3>8. Enable Your News Feed</h3>
+          <p>Enable acceptable sources, then enable the profile.</p>
+          <p><strong>News feeds</strong> controls whether the profile's completed output is included in scheduled delivery.</p>
+          <p>Enabled profiles are discovered automatically. Creating a new profile does not require changes to n8n.</p>
         </div>
 
         <div class="card">
           <h3>9. Zero to Hero</h3>
-
           <ol>
-            <li>Create a profile.</li>
-            <li>Add meaningful keywords.</li>
-            <li>Choose 1–10 stories for the digest.</li>
+            <li>Create a profile and describe what it is about.</li>
+            <li>Add optional Keywords only if useful.</li>
+            <li>Choose Stories in digest.</li>
             <li>Add a web source.</li>
-            <li>Set conservative workload budgets.</li>
+            <li>Set conservative source limits.</li>
             <li>Validate the source.</li>
-            <li>Review PASS, WARNING or FAIL.</li>
             <li>Enable acceptable sources.</li>
-            <li>Enable the profile.</li>
-            <li>Monitor collection results and workload.</li>
+            <li>Enable the profile and News feeds.</li>
+            <li>Monitor results and refine only when necessary.</li>
           </ol>
         </div>
 
         <div class="card">
-          <h3>10. Delete vs Disable</h3>
-
-          <p>
-            <strong>Disable</strong> is reversible and should normally
-            be your first choice.
-          </p>
-
-          <p>
-            <strong>Delete</strong> removes configuration.
-            Profile and source deletion therefore require explicit
-            confirmation.
-          </p>
-        </div>
-
-        <div class="card">
-          <h3>11. What Happens When a Profile Runs?</h3>
-
+          <h3>10. What Happens When It Runs?</h3>
           <ol>
-            <li>The collector reads the enabled profile.</li>
-            <li>It loads that profile's enabled sources.</li>
-            <li>Each source listing is inspected for candidate links.</li>
-            <li>Workload budgets limit how much work is attempted.</li>
-            <li>Candidate article pages are fetched.</li>
-            <li>The article is checked for profile relevance.</li>
-            <li>Freshness and other validation rules are applied.</li>
-            <li>Accepted articles continue into analysis.</li>
-            <li>
-              If this profile is included in your news feeds, its
-              completed output is automatically included in scheduled
-              runs.
-            </li>
+            <li>News 4 Legends discovers all enabled profiles.</li>
+            <li>It loads each profile's enabled sources.</li>
+            <li>Source listings are inspected for candidate links.</li>
+            <li>Workload limits bound collection.</li>
+            <li>Candidate articles are fetched and checked for relevance and freshness.</li>
+            <li>Accepted articles continue into analysis and synthesis.</li>
+            <li>Enabled profiles contribute to the combined digest.</li>
           </ol>
-
-          <p>
-            Source discovery and topic relevance are deliberately
-            separate. Finding a link does not automatically mean the
-            article is accepted.
-          </p>
+          <p>Finding a link does not automatically mean the article is accepted.</p>
         </div>
 
         <div class="card">
-          <h3>12. Production automation</h3>
-
-          <p>
-            UI-created web sources can enter production without
-            manually editing YAML once they are validated and enabled.
-          </p>
-
-          <p>
-            Generic multi-profile orchestration is active. Enabled
-            profiles are automatically discovered and included in
-            your news feeds.
-          </p>
-
-          <p>
-            Creating a new profile does not require changes to n8n.
-            Enable the profile when you want it included in scheduled
-            runs.
-          </p>
+          <h3>11. Delete vs Disable</h3>
+          <p><strong>Disable</strong> is reversible and should normally be your first choice.</p>
+          <p><strong>Delete</strong> removes configuration and therefore requires explicit confirmation.</p>
         </div>
 
         <p><a href="/">← Back to profiles</a></p>
@@ -1235,6 +1128,19 @@ def edit_profile(profile_id: str):
         ).fetchall()
     ]
 
+    entities = [
+        row["entity"]
+        for row in db.execute(
+            """
+            SELECT entity
+            FROM profile_entities
+            WHERE profile_id = ?
+            ORDER BY rowid
+            """,
+            (profile["id"],),
+        ).fetchall()
+    ]
+
     db.close()
 
     return page(f"""
@@ -1258,12 +1164,15 @@ def edit_profile(profile_id: str):
 
           <p>
             <strong>Topic</strong> is the main subject.
-            <strong>Keywords</strong> add optional supporting clues
-            such as synonyms, jargon and alternative phrases.
+            <strong>Extra Keywords</strong> add useful clues such as
+            synonyms, jargon and alternative terms.
+            <strong>Important Names</strong> add specific people,
+            organisations, products, teams, characters or places
+            that may help identify relevant stories.
           </p>
 
           <p>
-            Topic and Keywords work together. Keywords
+            These fields work together. Keywords and names
             <strong>enrich the Topic</strong>; they are not a list of
             words that every article must contain.
           </p>
@@ -1284,7 +1193,7 @@ def edit_profile(profile_id: str):
 
           <p>
             If <strong>Include this profile in my news feeds</strong>
-            is enabled, the finished profile digest is included in
+            is enabled, the finished profile digest is intended for
             your news feeds.
           </p>
         </div>
@@ -1320,32 +1229,36 @@ def edit_profile(profile_id: str):
             </label>
             <br>
             <small>
-              <strong>This is the starting point.</strong>
-              Tell News 4 Legends what you want it to look for.
-              Use a clear subject such as <em>Cybersecurity</em>,
-              <em>Formula 1</em> or <em>Artificial Intelligence</em>.
-              The collector uses this as its main relevance signal
-              when examining material discovered from your sources.
+              <strong>This is the primary relevance instruction.</strong>
+              Describe what the stories should actually be about.
+              Use a clear subject, or separate distinct concepts
+              with commas or semicolons. Multi-word concepts are
+              treated as complete phrases.
             </small>
           </p>
 
           <p>
             <label>
-              <strong>Keywords (optional)</strong><br>
+              <strong>Extra keywords (optional)</strong><br>
               <input name="keywords"
                      style="width:100%"
-                     value="{html.escape(", ".join(keywords), quote=True)}">
+                     value="{html.escape(", ".join(dict.fromkeys(keywords + entities)), quote=True)}">
             </label>
             <br>
             <small>
-              <strong>Optional clues that enrich the Topic.</strong>
-              Add alternative names, abbreviations, jargon or common
-              phrases that may help the collector recognise relevant
-              material. These apply across every source in the profile.
-              They are not mandatory words: an article does not need
-              to contain every keyword to be relevant.
+              <strong>Optional supporting relevance clues.</strong>
+              Add useful names, organisations, teams, products,
+              abbreviations, jargon, synonyms or phrases. Separate
+              them with commas. Keywords strengthen or broaden the
+              Topic; they are not words every article must contain.
             </small>
           </p>
+
+
+
+          <input type="hidden"
+                 name="minimum_source_score"
+                 value="{profile["minimum_source_score"]}">
 
           <p>
             <label>
@@ -1355,14 +1268,13 @@ def edit_profile(profile_id: str):
                      min="1"
                      max="10"
                      required
-                     value="{profile["llm_limit"] or 3}">
+                     value="{profile["llm_limit"]}">
             </label>
             <br>
             <small>
-              Choose 1–10. The actual digest may contain fewer stories
-              when fewer valid clusters are available or a lower
-              configured LLM-call budget applies. Collection budgets
-              do not increase automatically.
+              Choose how many top-ranked stories this profile may
+              contribute to the digest (1–10). More stories may use
+              more AI synthesis calls. Default: <strong>3</strong>.
             </small>
           </p>
 
@@ -1445,7 +1357,7 @@ def edit_profile(profile_id: str):
             <br>
             <small>
               Turn this on if you want this profile's finished digest
-              delivered to your news feeds.
+              included in your news feeds.
               Sources do not need their own feed setting:
               every enabled source contributes to its parent profile,
               and the profile controls delivery.
@@ -1465,8 +1377,9 @@ def save_profile(
     name: str = Form(...),
     topic: str = Form(...),
     keywords: str = Form(""),
-    llm_limit: int = Form(3),
+    minimum_source_score: int = Form(...),
     maximum_age_hours: int = Form(...),
+    llm_limit: int = Form(...),
     email_theme: str = Form("auto"),
     telegram_enabled: str | None = Form(None),
 ):
@@ -1493,8 +1406,9 @@ def save_profile(
     if (
         not name
         or not topic
-        or not 1 <= llm_limit <= 10
+        or not 0 <= minimum_source_score <= 100
         or maximum_age_hours < 1
+        or not 1 <= llm_limit <= 10
         or email_theme not in valid_email_themes
     ):
         return HTMLResponse(
@@ -1521,8 +1435,9 @@ def save_profile(
         UPDATE profiles
         SET name = ?,
             topic = ?,
-            llm_limit = ?,
+            minimum_source_score = ?,
             maximum_age_hours = ?,
+            llm_limit = ?,
             email_theme = ?,
             telegram_enabled = ?
         WHERE id = ?
@@ -1530,8 +1445,9 @@ def save_profile(
         (
             name,
             topic,
-            llm_limit,
+            minimum_source_score,
             maximum_age_hours,
+            llm_limit,
             email_theme,
             1 if telegram_enabled else 0,
             profile["id"],
@@ -1546,19 +1462,7 @@ def save_profile(
         (profile["id"],),
     )
 
-    db.executemany(
-        """
-        INSERT INTO profile_keywords (
-            profile_id,
-            keyword
-        )
-        VALUES (?, ?)
-        """,
-        [
-            (profile["id"], value)
-            for value in keyword_values
-        ],
-    )
+    db.executemany("INSERT INTO profile_keywords (profile_id, keyword) VALUES (?, ?)", [(profile["id"], value) for value in keyword_values])
 
     db.commit()
     db.close()
@@ -2014,8 +1918,10 @@ def new_profile():
 
           <p>
             <strong>Topic</strong> is the main subject.
-            <strong>Keywords</strong> optionally enrich it with
-            synonyms, jargon and related phrases.
+            <strong>Extra Keywords</strong> enrich it with synonyms,
+            jargon and related phrases.
+            <strong>Important Names</strong> add specific people,
+            organisations, products, teams, characters or places.
           </p>
 
           <p>
@@ -2028,8 +1934,8 @@ def new_profile():
 
           <p>
             You do not need to predict every possible keyword.
-            Start with a clear Topic and add Keywords when they
-            genuinely help describe what you want.
+            Start with a clear Topic and add Keywords or Important
+            Names when they genuinely help describe what you want.
           </p>
         </div>
 
@@ -2059,15 +1965,17 @@ def new_profile():
             <br>
             <small>
               <strong>Required.</strong>
-              This is the main definition of what you want to follow.
-              The collector always uses it for relevance.
-              You can use commas for closely related terms.
+              Describe what the stories should actually be about.
+              Separate distinct concepts with commas or semicolons.
+              Multi-word concepts are treated as complete phrases,
+              so describe each subject naturally rather than breaking
+              it into individual words.
             </small>
           </p>
 
           <p>
             <label>
-              <strong>Keywords (optional)</strong><br>
+              <strong>Extra keywords (optional)</strong><br>
               <input name="keywords"
                      style="width:100%"
                      placeholder="Optional: ransomware, vulnerability, zero-day">
@@ -2075,12 +1983,14 @@ def new_profile():
             <br>
             <small>
               <strong>Optional.</strong>
-              Add synonyms, abbreviations, jargon or phrases that may
-              help identify relevant stories. Separate them with
-              commas. Leave this blank if Topic already describes
-              what you want. You can tune this later.
+              Add supporting names, organisations, teams, products,
+              synonyms, abbreviations, jargon or phrases. Separate
+              them with commas. Leave this blank when the Topic alone
+              describes what you want.
             </small>
           </p>
+
+
 
           <p>
             <label>
@@ -2094,9 +2004,9 @@ def new_profile():
             </label>
             <br>
             <small>
-              Choose 1–10. This controls the requested output size,
-              not the collection workload. Fewer stories may be
-              produced when fewer valid clusters are available.
+              Maximum top-ranked stories from this profile to include
+              in each digest. Choose 1–10. More stories may use more
+              AI synthesis calls.
             </small>
           </p>
 
@@ -2267,7 +2177,7 @@ def validate_source(
     }).encode("utf-8")
 
     request = urllib.request.Request(
-        "http://news4legends-worker:8080/preflight",
+        WORKER_URL + "/preflight",
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -2822,26 +2732,6 @@ def edit_source(
         if source["stop_after_consecutive_stale"] is not None
         else ""
     )
-    max_candidates_value = (
-        source["max_candidates"]
-        if source["max_candidates"] is not None
-        else 40
-    )
-    max_fetches_value = (
-        source["max_fetches"]
-        if source["max_fetches"] is not None
-        else 40
-    )
-    request_timeout_value = (
-        source["request_timeout_seconds"]
-        if source["request_timeout_seconds"] is not None
-        else 15
-    )
-    max_source_runtime_value = (
-        source["max_source_runtime_seconds"]
-        if source["max_source_runtime_seconds"] is not None
-        else 60
-    )
 
     collector_options = "".join(
         f'<option value="{value}"'
@@ -2889,11 +2779,11 @@ def edit_source(
                    type="checkbox"
                    value="1"
                    {checked}>
-            Topic focused
+            Topic focused <a class="info" href="#help-topic-focused">ⓘ</a>
           </label></p>
 
           <p><label>
-            Credibility score<br>
+            Credibility score <a class="info" href="#help-credibility">ⓘ</a><br>
             <input name="credibility_score"
                    type="number"
                    min="0"
@@ -2903,45 +2793,45 @@ def edit_source(
           </label></p>
 
           <p><label>
-            Candidate discovery budget<br>
+            Candidate discovery budget <a class="info" href="#help-form-candidates">ⓘ</a><br>
             <input name="max_candidates"
                    type="number"
                    min="1"
                    required
-                   value="{max_candidates_value}">
+                   value="{source["max_candidates"] if source["max_candidates"] is not None else 40}">
           </label></p>
 
           <p><label>
-            Fetch budget<br>
+            Fetch budget <a class="info" href="#help-form-fetch">ⓘ</a><br>
             <input name="max_fetches"
                    type="number"
                    min="1"
                    required
-                   value="{max_fetches_value}">
+                   value="{source["max_fetches"] if source["max_fetches"] is not None else 40}">
           </label></p>
 
           <p><label>
-            Request timeout (seconds)<br>
+            Request timeout (seconds) <a class="info" href="#help-form-timeout">ⓘ</a><br>
             <input name="request_timeout_seconds"
                    type="number"
                    min="1"
                    step="0.1"
                    required
-                   value="{request_timeout_value}">
+                   value="{source["request_timeout_seconds"] if source["request_timeout_seconds"] is not None else 15}">
           </label></p>
 
           <p><label>
-            Maximum source runtime (seconds)<br>
+            Maximum source runtime (seconds) <a class="info" href="#help-form-runtime">ⓘ</a><br>
             <input name="max_source_runtime_seconds"
                    type="number"
                    min="1"
                    step="0.1"
                    required
-                   value="{max_source_runtime_value}">
+                   value="{source["max_source_runtime_seconds"] if source["max_source_runtime_seconds"] is not None else 60}">
           </label></p>
 
           <p><label>
-            Stop after consecutive stale articles<br>
+            Stop after consecutive stale articles <a class="info" href="#help-stale">ⓘ</a><br>
             <input name="stop_after_consecutive_stale"
                    type="number"
                    min="1"
@@ -2951,6 +2841,72 @@ def edit_source(
 
           <button type="submit">Save changes</button>
         </form>
+
+<div id="help-topic-focused" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Topic focused</h3>
+          <p>
+            Use this when the source is primarily dedicated to this
+            profile's subject rather than covering many unrelated topics.
+          </p>
+        </div>
+
+        <div id="help-credibility" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Credibility score</h3>
+          <p>
+            Your profile-specific weighting for this source. It affects
+            how the profile treats information from the source; it is
+            not an objective or global rating of the publisher.
+          </p>
+        </div>
+
+        <div id="help-form-candidates" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Candidate discovery budget</h3>
+          <p>
+            Maximum article links this source may consider in one
+            collection run. Lower values reduce workload.
+          </p>
+        </div>
+
+        <div id="help-form-fetch" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Fetch budget</h3>
+          <p>
+            Maximum article pages this source may download in one run.
+            Use this to prevent a broad source from consuming excessive
+            network, CPU and collection time.
+          </p>
+        </div>
+
+        <div id="help-form-timeout" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Request timeout</h3>
+          <p>
+            Maximum time for one web request. A request that takes
+            longer is abandoned rather than allowed to hang collection.
+          </p>
+        </div>
+
+        <div id="help-form-runtime" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Maximum source runtime</h3>
+          <p>
+            Overall time budget for this source. Once consumed, the
+            collector stops starting further candidate requests for it.
+          </p>
+        </div>
+
+        <div id="help-stale" class="info-box">
+          <a class="info-close" href="#">×</a>
+          <h3>Stop after consecutive stale articles</h3>
+          <p>
+            If this many articles in a row are older than the profile's
+            freshness window, stop checking further links from this
+            source. Leave blank for no stale-article early stop.
+          </p>
+        </div>
 
         <div class="guidance warning">
           <h3>Validation safety</h3>
@@ -3345,3 +3301,181 @@ def create_source(
         url=f"/profiles/{profile_id}",
         status_code=303,
     )
+
+
+
+# Read-only System Health dashboard.
+# Authorization is enforced by stage3_auth_gate.
+@app.get("/system-health", response_class=HTMLResponse)
+def system_health_dashboard():
+    from health_charts import render
+    from fastapi.responses import HTMLResponse
+    try:
+        return HTMLResponse(render(), headers={"Cache-Control": "no-store"})
+    except (OSError, ValueError, KeyError, TypeError):
+        return HTMLResponse("System Health temporarily unavailable", status_code=503)
+
+
+
+
+# Authentication and authorization boundary.
+@app.middleware("http")
+async def stage3_auth_gate(request: Request, call_next):
+    from auth import COOKIE_NAME, get_session
+    # Authentication uses the application's existing SQLite database.
+
+    path = request.url.path
+    if path in ("/login", "/health") or path.startswith("/static/"):
+        return await call_next(request)
+
+    # API authentication is handled independently by the API router.
+    if path == "/api/v1" or path.startswith("/api/v1/"):
+        return await call_next(request)
+
+    token = request.cookies.get(COOKIE_NAME)
+    try:
+        db = get_db()
+        try:
+            session = get_session(db, token)
+        finally:
+            db.close()
+    except (sqlite3.Error, OSError):
+        return HTMLResponse("Authentication unavailable", status_code=503)
+
+    if session is None:
+        if request.method == "GET":
+            return RedirectResponse("/login", status_code=303)
+        return HTMLResponse("Authentication required", status_code=401)
+
+    user = dict(session)
+    request.state.auth_user = user
+
+    # Role and profile authorization.
+    from access import allowed_profile
+
+    if user["role"] not in ("admin", "contributor"):
+        return HTMLResponse("Forbidden", status_code=403)
+
+    if user["role"] != "admin" and (
+        path in ("/new-profile", "/security", "/logs/download", "/system-health")
+        or path == "/users"
+        or path.startswith("/users/")
+        or path == "/api-management"
+        or path.startswith("/api-management/")
+    ):
+        return HTMLResponse("Forbidden", status_code=403)
+
+    if path.startswith("/profiles/"):
+        parts = path.strip("/").split("/")
+        if len(parts) >= 2:
+            db = get_db()
+            try:
+                permitted = allowed_profile(db, user, parts[1])
+            finally:
+                db.close()
+
+            if not permitted:
+                return HTMLResponse("Forbidden", status_code=403)
+
+    # Destructive profile and source actions are admin-only.
+    if user["role"] != "admin" and (
+        path.endswith("/delete")
+        or path.endswith("/enable")
+        or path.endswith("/disable")
+    ):
+        return HTMLResponse("Forbidden", status_code=403)
+
+    if request.method == "POST":
+        from auth import verify_csrf
+        from urllib.parse import parse_qs
+
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("application/x-www-form-urlencoded"):
+            raw_body = await request.body()
+            fields = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
+            submitted_csrf = fields.get("csrf_token", [None])[0]
+        else:
+            form = await request.form()
+            submitted_csrf = form.get("csrf_token")
+
+        if not verify_csrf(session, submitted_csrf):
+            return HTMLResponse("Invalid CSRF token", status_code=403)
+
+    response = await call_next(request)
+
+    # Add session CSRF tokens to existing HTML POST forms.
+    # Login has its own independent CSRF protection.
+    if (
+        request.method == "GET"
+        and response.headers.get("content-type", "").startswith("text/html")
+    ):
+        from starlette.responses import StreamingResponse
+        import re
+
+        chunks = [chunk async for chunk in response.body_iterator]
+        body = b"".join(
+            chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+            for chunk in chunks
+        ).decode("utf-8")
+
+        token = html.escape(session["csrf_token"], quote=True)
+
+        def add_csrf(match):
+            opening = match.group(0)
+            if re.search(
+                r"""\bmethod\s*=\s*["']post["']""",
+                opening,
+                re.IGNORECASE,
+            ):
+                return (
+                    opening
+                    + '<input type="hidden" name="csrf_token" value="'
+                    + token
+                    + '">'
+                )
+            return opening
+
+        body = re.sub(
+            r"<form\b[^>]*>",
+            add_csrf,
+            body,
+            flags=re.IGNORECASE,
+        )
+
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers.pop("content-encoding", None)
+        headers["Cache-Control"] = "no-store"
+
+        return HTMLResponse(
+            body,
+            status_code=response.status_code,
+            headers=headers,
+            background=response.background,
+        )
+
+    return response
+
+
+from auth_web import router as auth_router
+app.include_router(auth_router)
+
+from users_web import router as users_router
+app.include_router(users_router)
+
+
+# News 4 Legends REST API
+import api_v1
+app.include_router(api_v1.router)
+
+import api_crud
+app.include_router(api_crud.router)
+
+from api_management_web import router as api_management_router
+app.include_router(api_management_router)
+
+from api_token_purge import router as api_token_purge_router
+app.include_router(api_token_purge_router)
+
+from api_observability import router as observability_router
+app.include_router(observability_router)

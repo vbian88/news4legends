@@ -348,6 +348,40 @@ def same_domain(url_a, url_b):
     return domain_a == domain_b
 
 
+# Editorial exclusions: applied before article ranking and synthesis.
+BLOCKED_ARTICLE_IDS = frozenset({
+    "cmd7qnqrzdg1o",  # Recurring BBC Sport football quiz
+})
+
+QUIZ_TITLE_FRAGMENTS = (
+    "football quiz",
+    "football quizzes",
+    "daily football quiz",
+    "football trivia",
+    "who am i?",
+    "five in five",
+    "brainteaser",
+)
+
+
+def is_excluded_editorial_content(url, title=""):
+    from urllib.parse import urlparse
+
+    path = urlparse(url).path.lower()
+    title_lower = " ".join(title.lower().split())
+
+    if any(
+        article_id in path.split("/")
+        for article_id in BLOCKED_ARTICLE_IDS
+    ):
+        return True
+
+    return any(
+        fragment in title_lower
+        for fragment in QUIZ_TITLE_FRAGMENTS
+    )
+
+
 def looks_like_possible_article_url(
     url,
     listing_url,
@@ -366,6 +400,9 @@ def looks_like_possible_article_url(
         return False
 
     path = parsed.path.lower()
+
+    if is_excluded_editorial_content(url):
+        return False
 
     if path in (
         "",
@@ -1147,10 +1184,26 @@ def title_is_generic(title):
     if cleaned in GENERIC_PAGE_TERMS:
         return True
 
-    return any(
+    if any(
         fragment in cleaned
         for fragment
         in BAD_TITLE_FRAGMENTS
+    ):
+        return True
+
+    # Reject generic rolling/index-page titles. These pages aggregate
+    # many stories, so their body can contain enough topic/keyword
+    # evidence to masquerade as an individual relevant article.
+    generic_index_patterns = (
+        r"^notizie dal mondo (?:del|della|dello|dei|degli|delle) ",
+        r"^notizie (?:di|sul|sulla|su) ",
+        r"^news (?:about|on|from) ",
+        r"^(?:latest|breaking) news(?: |$)",
+    )
+
+    return any(
+        re.search(pattern, cleaned)
+        for pattern in generic_index_patterns
     )
 
 
@@ -1315,6 +1368,149 @@ def headline_matches_topic(
     return False
 
 
+def _relevance_tokens(value):
+    return [
+        token.casefold()
+        for token in re.findall(
+            r"[\wÀ-ÿ]+",
+            value or "",
+        )
+        if token
+    ]
+
+
+def _contains_phrase(tokens, phrase_tokens):
+    if not phrase_tokens or len(phrase_tokens) > len(tokens):
+        return False
+
+    size = len(phrase_tokens)
+
+    return any(
+        tokens[index:index + size] == phrase_tokens
+        for index in range(len(tokens) - size + 1)
+    )
+
+
+def _topic_concepts(topic):
+    """
+    Each comma/semicolon-delimited topic is one exact phrase concept.
+
+    Examples:
+      "Serie A; Premier League"
+      -> [["serie", "a"], ["premier", "league"]]
+
+    Components of a phrase never match independently.
+    """
+    return [
+        _relevance_tokens(part.strip())
+        for part in re.split(r"[,;]", topic or "")
+        if part.strip()
+    ]
+
+
+def generic_relevance(
+    title,
+    text,
+    topic,
+    keywords,
+    entities,
+    url="",
+):
+    """
+    Domain-neutral deterministic relevance evidence.
+
+    Returns (state, score):
+      ACCEPT     strong lexical evidence
+      AMBIGUOUS  plausible candidate worth considering/fetching
+      REJECT     no useful profile evidence
+
+    Topic/description is the primary subject boundary.
+    Explicit keywords/entities are secondary user intent.
+    Headline evidence is stronger than body evidence.
+    URL evidence is useful for listing prioritisation but weak alone.
+    """
+
+    title_tokens = _relevance_tokens(title)
+    body_tokens = _relevance_tokens(text)
+    url_tokens = _relevance_tokens(url)
+
+    topic_concepts = _topic_concepts(topic)
+
+    explicit_terms = list(dict.fromkeys(
+        str(value).strip()
+        for value in [
+            *(keywords or []),
+            *(entities or []),
+        ]
+        if str(value).strip()
+    ))
+
+    score = 0
+    strong_signal = False
+
+    # Main natural-language description: dominant evidence.
+    topic_title_hits = sum(
+        1 for concept in topic_concepts
+        if _contains_phrase(title_tokens, concept)
+    )
+    topic_body_hits = sum(
+        1 for concept in topic_concepts
+        if _contains_phrase(body_tokens, concept)
+    )
+    topic_url_hits = sum(
+        1 for concept in topic_concepts
+        if _contains_phrase(url_tokens, concept)
+    )
+
+    score += min(topic_title_hits, 3) * 4
+    score += min(topic_body_hits, 3) * 2
+    score += min(topic_url_hits, 2)
+
+    if topic_title_hits >= 1:
+        strong_signal = True
+
+        # A direct headline hit on the profile subject is sufficient
+        # deterministic evidence.
+        score += 1
+
+    if topic_body_hits >= 1:
+        # Exact topic concepts in the extracted article body establish
+        # subject relevance even when the headline omits the concept.
+        # Explicit keyword-only body hits remain supporting evidence.
+        strong_signal = True
+        score += 3
+
+    # User-entered phrases can deliberately broaden a profile.
+    # Exact phrase/token matching avoids arbitrary substring hits.
+    for value in explicit_terms:
+        phrase = _relevance_tokens(value)
+
+        if not phrase:
+            continue
+
+        if _contains_phrase(title_tokens, phrase):
+            # A specific phrase/name may intentionally broaden scope.
+            # A generic one-word keyword is supporting evidence only;
+            # it must not independently override the main topic.
+            if len(phrase) >= 2 or len(phrase[0]) >= 8:
+                score += 6
+                strong_signal = True
+            else:
+                score += 2
+        elif _contains_phrase(url_tokens, phrase):
+            score += 2
+        elif _contains_phrase(body_tokens, phrase):
+            score += 1
+
+    if strong_signal and score >= 5:
+        return "ACCEPT", score
+
+    if score >= 2:
+        return "AMBIGUOUS", score
+
+    return "REJECT", score
+
+
 def generic_text_matches_topic(
     title,
     text,
@@ -1322,48 +1518,15 @@ def generic_text_matches_topic(
     keywords,
     entities,
 ):
-    title_text = clean_headline_for_topic_check(
-        title or ""
-    ).casefold()
-
-    body_text = re.sub(
-        r"\\s+",
-        " ",
-        text or "",
-    ).casefold()
-
-    topic_terms = [
-        value.strip()
-        for value in re.split(
-            r"[,;]",
-            topic or "",
-        )
-        if value.strip()
-    ]
-
-    strong_terms = list(
-        dict.fromkeys(
-            [
-                *topic_terms,
-                *keywords,
-                *entities,
-            ]
-        )
+    state, _ = generic_relevance(
+        title=title,
+        text=text,
+        topic=topic,
+        keywords=keywords,
+        entities=entities,
     )
 
-    for term in strong_terms:
-        normalized = str(term).strip().casefold()
-
-        if not normalized:
-            continue
-
-        if normalized in title_text:
-            return True
-
-        if normalized in body_text:
-            return True
-
-    return False
+    return state == "ACCEPT"
 
 
 def validate_article(
@@ -1409,6 +1572,12 @@ def validate_article(
         return (
             False,
             "non-football headline",
+        )
+
+    if is_excluded_editorial_content(url, title):
+        return (
+            False,
+            "excluded recurring quiz/trivia content",
         )
 
     if len(text) < (
@@ -1598,6 +1767,37 @@ def collect_source(
         f"{len(candidates)}"
     )
 
+    if profile_slug != "roma" and not roma_focused:
+        for candidate in candidates:
+            state, relevance_score = generic_relevance(
+                title=candidate["anchor_text"],
+                text="",
+                topic=topic,
+                keywords=keywords,
+                entities=entities,
+                url=candidate["url"],
+            )
+            candidate["relevance_state"] = state
+            candidate["relevance_score"] = relevance_score
+
+        state_rank = {
+            "ACCEPT": 2,
+            "AMBIGUOUS": 1,
+            "REJECT": 0,
+        }
+
+        candidates.sort(
+            key=lambda candidate: (
+                state_rank.get(
+                    candidate.get("relevance_state"),
+                    0,
+                ),
+                candidate.get("relevance_score", 0),
+                candidate.get("score", 0),
+            ),
+            reverse=True,
+        )
+
     results = []
     fetched_count = 0
     consecutive_stale = 0
@@ -1648,18 +1848,27 @@ def collect_source(
                     "listing headline/URL not Roma-related"
                 )
             else:
-                listing_relevant = (
-                    generic_text_matches_topic(
+                listing_state, listing_score = (
+                    generic_relevance(
                         title=anchor_text,
                         text="",
                         topic=topic,
                         keywords=keywords,
                         entities=entities,
+                        url=url,
                     )
                 )
+                # Generic listing relevance is prioritisation evidence,
+                # not a hard admission gate. A headline may omit the
+                # profile concept even when the full article establishes it.
+                # Final article validation remains authoritative.
+                listing_relevant = True
                 listing_reason = (
-                    "listing headline not profile-related"
+                    "listing relevance used for prioritisation only"
                 )
+
+                candidate["relevance_state"] = listing_state
+                candidate["relevance_score"] = listing_score
 
             if not listing_relevant:
                 print(

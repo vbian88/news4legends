@@ -13,7 +13,19 @@ services:
       - news4legends_data:/data
       - ${MAINTENANCE_REPORTS_DIR:-./maintenance/reports}:/security-reports:ro
     environment:
-      NEWS4LEGENDS_SECURITY_REPORT_DIR: "/security-reports"
+      NEWS4LEGENDS_DB_PATH: "/data/home-ai-news.db"
+      NEWS4LEGENDS_REPORT_DIR: "/security-reports"
+      NEWS4LEGENDS_WORKER_URL: "http://news4legends-worker:8080"
+      NEWS4LEGENDS_COOKIE_SECURE: "${NEWS4LEGENDS_COOKIE_SECURE:-false}"
+      TZ: "${TZ:-UTC}"
+    depends_on:
+      news4legends-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     networks:
       - news4legends-control
 
@@ -28,14 +40,18 @@ services:
       - news4legends_data:/config:ro
       - news4legends_runtime:/data
       - ./config/collector.yaml:/config/collector.yaml:ro
-      - ./secrets/llm_api_key:/run/secrets/llm_api_key:ro
     environment:
-      TZ: "${TZ:-Europe/London}"
+      TZ: "${TZ:-UTC}"
       OMNIROUTE_API_URL: "${LLM_API_URL}"
       OMNIROUTE_MODEL: "${LLM_MODEL}"
-      OMNIROUTE_API_KEY_FILE: "/run/secrets/llm_api_key"
+      OMNIROUTE_API_KEY: "${LLM_API_KEY:-}"
       LOG_DIR: "/data/logs"
       LOG_RETENTION_DAYS: "7"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     networks:
       - news4legends-control
       - news4legends-llm
@@ -49,12 +65,17 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     environment:
-      TZ: "${TZ:-Europe/London}"
-      N8N_SECURE_COOKIE: "false"
+      TZ: "${TZ:-UTC}"
+      N8N_SECURE_COOKIE: "${N8N_SECURE_COOKIE:-false}"
       N8N_EDITOR_BASE_URL: "${N8N_EDITOR_BASE_URL}"
       WEBHOOK_URL: "${WEBHOOK_URL}"
     networks:
       - news4legends-control
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
 
 volumes:
   news4legends_data:

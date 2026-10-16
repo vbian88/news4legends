@@ -42,6 +42,9 @@ data/
 runtime/
 output/
 tmp/
+backups/
+health/data/
+health/reports/
 
 # Generated article/digest data
 *_articles.json

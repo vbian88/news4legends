@@ -153,6 +153,20 @@ Verify destination exists, has space and restrictive permissions; resolve actual
 
 Stop and preserve both original backup and failed target. Verify checksums, Git revision, SQLite integrity/version, volume target names, ownership, and that complete n8n state (including encryption material) was restored together. Test on an isolated project; never improvise destructive commands against production.
 
+## Administrator password recovery
+
+Run the reset tool interactively so the new password is not stored in shell history:
+
+```bash
+docker compose run --rm news4legends-ui python reset_admin.py
+```
+
+**What you should see:** `Password reset and existing sessions revoked.`
+
+**If you don't see it:** Confirm the username belongs to an existing administrator and that the UI data volume is mounted. Do not create a default credential or edit the hash manually.
+
+**Don't continue until the administrator can sign in and the old password/session no longer works.**
+
 ## Escalation evidence
 
 Collect versions, timestamps, service status, sanitized error text, affected profile/source, and exact step. Redact API keys, tokens, OAuth data, recipients, chat IDs, private URLs, database content, and full workflow exports before sharing.
