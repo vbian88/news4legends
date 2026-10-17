@@ -69,3 +69,52 @@ Reports and state are runtime data and are ignored by Git. They may reveal insta
 ## Manual remediation
 
 Follow the backup-first procedure in [Upgrading](UPGRADING.md). Confirm the installed version dynamically, validate that the advisory applies to the installed branch, verify a recent checksum-valid backup, record the current image ID, update one component, validate it, rerun `manual`, and retain the rollback path. Never convert these scripts into an automatic upgrader.
+
+## Optional malware, container and Debian scanning
+
+The repository also contains opt-in wrappers for ClamAV and Trivy. They do not install scanners, delete files, quarantine findings or upgrade images.
+
+| Variable | Purpose |
+| --- | --- |
+| `NEWS4LEGENDS_MAINTENANCE_ROOT` | Writable reports/state root; default `/var/lib/news4legends/maintenance` |
+| `N4L_CLAMAV_TARGETS` | Colon-separated scan roots; default `/app:/var/lib/news4legends` |
+| `N4L_HOST_LABEL` | Public-safe label used in alerts |
+| `N4L_TRIVY_IMAGE` | Scanner image; default `aquasec/trivy:latest` |
+| `N4L_SECURITY_WEBHOOK_URL` | Optional JSON webhook; an unset value causes a safe explicit skip |
+
+Run `maintenance/run_host_av.sh`, `maintenance/run_container_scan.sh` or
+`maintenance/run_debian_scan.sh` only after reviewing privileges and targets.
+Container scanning needs Docker access. Debian scanning mounts the host root
+read-only into Trivy. Both therefore run from a dedicated administrator
+context, never from the public UI.
+
+The vulnerability scanners write:
+
+- `container-vulnerabilities.json` and `debian-vulnerabilities.json`: separate
+  current inventories with package, CVE, installed and fixed versions;
+- `container-vulnerability-trends.json` and
+  `debian-vulnerability-trends.json`: bounded 90-observation histories;
+- `remediation-prompt.txt`: combined copyable manual-review input; and
+- `*-notified.json` under state: per-event delivery fingerprints.
+
+Critical and High events may be sent to `N4L_SECURITY_WEBHOOK_URL`. Repeating an
+identical scan does not resend an identical event. Medium and Low findings
+remain in dashboards and reports. No scanner applies upgrades.
+
+To install the supplied schedule, copy `maintenance/security.env.example` to
+`/etc/news4legends/security.env`, set mode `600`, replace its absolute path,
+test every scanner manually, then run:
+
+```bash
+sudo ./scripts/install-security-schedule.sh
+```
+
+The generated cron file runs application advisory checks daily, container and
+Debian scans weekly, and a weekly summary. Secrets remain in the protected env
+file, not in crontab.
+
+## Optional system health monitor
+
+`health/monitor.py` records bounded 30-day host/service samples and publishes `system-health.json` for the read-only dashboard. Paths, required containers, worker URL and backup signal are configured through `N4L_HEALTH_ROOT`, `N4L_REPORT_DIR`, `N4L_MONITORED_CONTAINERS`, `NEWS4LEGENDS_WORKER_URL` and `N4L_BACKUP_LOG`. Missing optional targets produce partial/unavailable signals instead of preventing the core UI and worker from starting.
+
+`health/alert_dispatcher.py` delivers only newly journaled incident transitions. Configure `N4L_HEALTH_WEBHOOK_URL`, `N4L_HEALTH_DASHBOARD_URL` and `TZ`; with no webhook it reports a skipped notification and does not claim delivery.

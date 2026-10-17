@@ -9,10 +9,12 @@ Protect the SQLite control plane, complete n8n state, `.env`, LLM secret, and cu
 | SQLite database | Profiles, sources, keywords, entities, validation/settings |
 | Complete `n8n_data` volume | Workflows, users, encryption state, encrypted credentials |
 | `.env` | Ports, URLs, timezone, LLM routing |
-| `secrets/llm_api_key` | LLM authentication |
+| Local `.env`/secret manager | LLM authentication; never commit the value |
 | Repository revision/custom files | Exact code, Compose, collector settings, workflow example |
 
 ## Create a backup
+
+For the SQLite database alone, `scripts/backup.sh` uses SQLite's online backup API, verifies integrity, checks for a non-empty result and writes a SHA-256 sidecar. Set `NEWS4LEGENDS_DB_PATH` and `NEWS4LEGENDS_BACKUP_DIR` explicitly when running it outside the container. The longer procedure below also captures n8n and configuration state.
 
 Choose a protected filesystem outside the repository. This example uses `/var/backups/news4legends`.
 
@@ -60,7 +62,7 @@ print(db.execute('PRAGMA user_version').fetchone()[0])
 PY
 ```
 
-**What you should see:** `ok` and schema version `1`.
+**What you should see:** `ok` and schema version `2` after a v2 installation or upgrade.
 
 **If you don't see it:** Discard that copy and repeat; do not label it a backup.
 
@@ -88,7 +90,6 @@ docker compose start n8n
 
 ```bash
 sudo install -m 600 .env "$N4L_BACKUP_DIR/env"
-sudo install -m 600 secrets/llm_api_key "$N4L_BACKUP_DIR/llm_api_key"
 git rev-parse HEAD | sudo tee "$N4L_BACKUP_DIR/git-revision.txt" >/dev/null
 sudo tar -czf "$N4L_BACKUP_DIR/custom-config.tar.gz" compose.yml config n8n/workflow.example.json
 sudo sha256sum "$N4L_BACKUP_DIR"/* | sudo tee "$N4L_BACKUP_DIR/SHA256SUMS" >/dev/null
@@ -103,7 +104,7 @@ Test in an isolated VM/host or separate Compose project. Never overwrite the onl
 
 1. Verify checksums: `sha256sum -c SHA256SUMS` from the backup directory.
 2. Check out the recorded Git revision.
-3. Restore `.env` and LLM key with mode `600`.
+3. Restore `.env` or re-provision the LLM key from your secret manager with mode `600`.
 4. Create the empty named volumes by running `docker compose create`.
 5. Stop all project containers.
 6. Resolve the target volume names by inspection.
@@ -121,7 +122,7 @@ This deletes content only inside the explicitly resolved isolated target volume.
 
 ## Restore acceptance
 
-- SQLite integrity is `ok`, version is 1, profiles/sources are present.
+- SQLite integrity is `ok`, version is 2, profiles/sources and users are present.
 - UI and worker health pass.
 - n8n workflow opens and encrypted credentials remain usable.
 - A bodyless manual run works.

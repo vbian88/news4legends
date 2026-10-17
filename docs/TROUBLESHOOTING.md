@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## Security or CTEM dashboards show no data
+
+**What you're doing:** Distinguishing an empty scan from a missing scan.
+
+```bash
+cd /opt/news4legends
+find maintenance/reports -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_container_scan.sh'
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_debian_scan.sh'
+```
+
+**What you should see:** Non-empty current inventory, trend history and
+remediation-prompt files. Missing data is displayed as unavailable, never as
+zero findings.
+
+**If you don't see it:** Confirm the maintenance root is the repository's
+`maintenance` directory, Docker is accessible to the scanner account, Trivy can
+be pulled, and the UI read-only mount points at the same reports directory.
+
+**Don't continue until both inventory files parse as JSON and the scan coverage
+is `COMPLETE` or an understood `PARTIAL`.**
+
 Work from the outside inward and change one thing at a time:
 
 ```text
@@ -152,6 +174,20 @@ Verify destination exists, has space and restrictive permissions; resolve actual
 ## Restore fails
 
 Stop and preserve both original backup and failed target. Verify checksums, Git revision, SQLite integrity/version, volume target names, ownership, and that complete n8n state (including encryption material) was restored together. Test on an isolated project; never improvise destructive commands against production.
+
+## Administrator password recovery
+
+Run the reset tool interactively so the new password is not stored in shell history:
+
+```bash
+docker compose run --rm news4legends-ui python reset_admin.py
+```
+
+**What you should see:** `Password reset and existing sessions revoked.`
+
+**If you don't see it:** Confirm the username belongs to an existing administrator and that the UI data volume is mounted. Do not create a default credential or edit the hash manually.
+
+**Don't continue until the administrator can sign in and the old password/session no longer works.**
 
 ## Escalation evidence
 

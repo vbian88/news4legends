@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 PROJECT_DIR = Path("/app")
 DATA_DIR = Path("/data")
 PROFILE_DB = "/config/home-ai-news.db"
-COLLECTOR_CONFIG = "/config/collector.yaml"
+COLLECTOR_CONFIG = os.environ.get("NEWS4LEGENDS_COLLECTOR_CONFIG", "/app/collector.yaml")
 
 
 def enabled_profiles():

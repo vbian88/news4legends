@@ -42,6 +42,9 @@ data/
 runtime/
 output/
 tmp/
+backups/
+health/data/
+health/reports/
 
 # Generated article/digest data
 *_articles.json
@@ -65,6 +68,7 @@ run-logs/
 maintenance/reports/
 maintenance/state/
 maintenance/config.json
+maintenance/security.env
 
 # Editors / OS
 .vscode/

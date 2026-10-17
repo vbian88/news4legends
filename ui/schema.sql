@@ -65,4 +65,70 @@ CREATE TABLE IF NOT EXISTS profile_entities (
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 );
 
-PRAGMA user_version = 1;
+CREATE TABLE IF NOT EXISTS auth_users (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'contributor')),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    csrf_token TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY(user_id) REFERENCES auth_users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_login_attempts (
+    id INTEGER PRIMARY KEY,
+    client_key TEXT NOT NULL,
+    attempted_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_client_time
+    ON auth_login_attempts(client_key, attempted_at);
+
+CREATE TABLE IF NOT EXISTS auth_profile_assignments (
+    user_id INTEGER NOT NULL,
+    profile_id INTEGER NOT NULL,
+    PRIMARY KEY(user_id, profile_id),
+    FOREIGN KEY(user_id) REFERENCES auth_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    token_hash TEXT NOT NULL UNIQUE,
+    scopes TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked_at INTEGER,
+    FOREIGN KEY(user_id) REFERENCES auth_users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS api_token_audit (
+    id INTEGER PRIMARY KEY,
+    actor_user_id INTEGER,
+    token_id INTEGER,
+    action TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(actor_user_id) REFERENCES auth_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_token_audit_created
+    ON api_token_audit(created_at);
+
+PRAGMA user_version = 2;

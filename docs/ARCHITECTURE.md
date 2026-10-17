@@ -40,7 +40,7 @@ flowchart TB
     N --> W
 ```
 
-The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker stores seven-day run logs under `/data/logs` in `news4legends_runtime`. It also receives `config/collector.yaml` and a read-only LLM secret mount. The worker has no host-published port; n8n reaches it by Compose service DNS.
+The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker stores seven-day run logs under `/data/logs` in `news4legends_runtime`. It receives the host's `config/collector.yaml` at `/app/collector.yaml`, outside the worker's read-only database mount; local LLM credentials are supplied through the ignored `.env` or an operator-managed override. The worker has no host-published port; n8n reaches it by Compose service DNS.
 
 `news4legends-control` links internal services. `news4legends-llm` isolates the worker's gateway-facing path and is useful when an LLM gateway joins that Docker network. An externally hosted endpoint is also supported if reachable from the worker.
 
@@ -55,7 +55,7 @@ flowchart LR
     E --> F["Next generic run discovers it"]
 ```
 
-SQLite schema version 1 has exactly five application tables:
+SQLite schema version 2 preserves the original five control-plane tables and adds authentication/API state:
 
 | Table | Responsibility |
 | --- | --- |
@@ -64,8 +64,11 @@ SQLite schema version 1 has exactly five application tables:
 | `profile_sources` | Per-profile URL, collector, weighting, budgets, validation, enablement |
 | `profile_keywords` | Profile keyword set |
 | `profile_entities` | Profile entity set |
+| `auth_users` / `auth_sessions` / `auth_login_attempts` | Identities, secure sessions and login throttling |
+| `auth_profile_assignments` | Contributor-to-profile authorization |
+| `api_tokens` / `api_token_audit` | Hashed scoped tokens and audit history |
 
-`listing_url` and `collector_type` belong to `profile_sources`, not `sources`. The bootstrap creates an empty version-1 database, preserves an existing version-1 database, and refuses an unexpected schema/version rather than migrating blindly.
+`listing_url` and `collector_type` belong to `profile_sources`, not `sources`. The bootstrap creates an empty v2 database, transactionally upgrades v1 while preserving data, is idempotent, and refuses newer unsupported versions.
 
 ## Processing pipeline
 
@@ -136,5 +139,13 @@ n8n owns SMTP credentials and sends the worker's rendered `email` field. The wor
 Historical `/run-test`, `/run-roma`, and Roma-specific commands are deliberately absent.
 
 ## Maintenance/security boundary
+
+Host-side zero-LLM scanners write bounded JSON/text reports under
+`maintenance/reports`. The UI mounts that directory read-only. Container,
+Debian OS and application-advisory data remain separate to avoid double
+counting CVEs; missing observations remain unavailable rather than becoming
+zero. The Security page renders current inventories and a manual-remediation
+prompt, while System Health renders timestamped severity trends. Scanner state
+and webhook fingerprints are never mounted writable into the UI.
 
 The host-run `maintenance/` scripts use no LLM. They dynamically query configured running containers for installed versions, obtain public advisories, classify confirmed matches or `UNCERTAIN` cases, and write runtime JSON/text under an ignored reports directory. Compose exposes only that report directory to the UI as a read-only mount. The dashboard cannot execute checks or upgrades.

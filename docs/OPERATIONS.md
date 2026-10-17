@@ -116,7 +116,7 @@ After host or Docker changes, reboot during a safe window and confirm services, 
 
 - Keep services on a trusted LAN/VPN.
 - Patch Debian and review container/dependency updates using the upgrade runbook.
-- Check secret permissions: `stat -c '%a %n' secrets/llm_api_key` should show `600`.
+- Check local configuration permissions: `stat -c '%a %n' .env` should show `600`.
 - Back up and test restore regularly.
 - Never paste complete logs/executions publicly without redaction.
 - Run `./maintenance/run.sh manual` after configuration changes and review the

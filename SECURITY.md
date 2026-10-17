@@ -2,7 +2,7 @@
 
 ## Supported version and reporting
 
-News 4 Legends is a self-hosted v1 project; fixes target the latest published revision. Report vulnerabilities through **GitHub Private Vulnerability Reporting** in the repository's Security tab. Do not open a public issue containing an exploitable vulnerability, credentials, private URLs, or personal data. Include the affected revision, deployment context, reproduction steps, impact, and any proposed mitigation.
+News 4 Legends is a self-hosted v2 project; fixes target the latest published revision. Report vulnerabilities through **GitHub Private Vulnerability Reporting** in the repository's Security tab. Do not open a public issue containing an exploitable vulnerability, credentials, private URLs, or personal data. Include the affected revision, deployment context, reproduction steps, impact, and any proposed mitigation.
 
 Private Vulnerability Reporting is enabled for this repository.
 
@@ -18,7 +18,12 @@ To the maximum extent permitted by applicable law, the software and all security
 
 ## Deployment boundary
 
-The supplied deployment is for a trusted LAN or private network. The UI and worker API have no user authentication. The example sets `N8N_SECURE_COOKIE=false` for private-LAN HTTP access; that is unsuitable for direct public exposure.
+The supplied deployment is for a trusted LAN or private VPN. The UI has
+password authentication, sessions, CSRF protection, roles/profile assignments
+and scoped API bearer tokens. Those controls do not make direct Internet
+exposure safe. The worker remains internal and unauthenticated by design. The
+examples allow HTTP and set secure cookies off for private-LAN access; that is
+unsuitable for direct public exposure.
 
 Do not expose the UI, worker API, or n8n directly to the Internet. For remote access, use a VPN or a deliberately configured reverse proxy with TLS, strong authentication, authorization, rate limiting, and firewall rules.
 
@@ -28,7 +33,10 @@ Do not expose the UI, worker API, or n8n directly to the Internet. For remote ac
 - n8n credential records, encryption keys, or persistent state
 - production databases, SSH private keys, personal addresses/chat IDs, logs, runtime data, or backups
 
-Store the LLM key in `secrets/llm_api_key` with mode `600`. n8n credential encryption state is recovery-critical; protect the complete `n8n_data` volume and do not rotate its encryption material casually.
+Store the local `.env` with mode `600`, or use an operator-managed secret
+manager/Compose override. Never commit it. n8n credential encryption state is
+recovery-critical; protect the complete `n8n_data` volume and do not rotate its
+encryption material casually.
 
 ## Untrusted content
 
