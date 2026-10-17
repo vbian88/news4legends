@@ -39,8 +39,9 @@ services:
     volumes:
       - news4legends_data:/config:ro
       - news4legends_runtime:/data
-      - ./config/collector.yaml:/config/collector.yaml:ro
+      - ./config/collector.yaml:/app/collector.yaml:ro
     environment:
+      NEWS4LEGENDS_COLLECTOR_CONFIG: /app/collector.yaml
       TZ: "${TZ:-UTC}"
       OMNIROUTE_API_URL: "${LLM_API_URL}"
       OMNIROUTE_MODEL: "${LLM_MODEL}"
