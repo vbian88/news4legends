@@ -585,6 +585,56 @@ def security_dashboard():
     findings = data.get("findings", [])
     manual = data.get("manual_review", [])
 
+    def read_inventory(filename):
+        try:
+            value = json.loads((REPORT_DIR / filename).read_text())
+            if value.get("schema_version") != 1:
+                raise ValueError("unsupported inventory")
+            return value
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def inventory_html(title, inventory):
+        if inventory is None:
+            return (
+                f"<div class='card'><h3>{html.escape(title)}</h3>"
+                "<p>No scan inventory is available yet. Missing data is not "
+                "treated as zero findings.</p></div>"
+            )
+        rows = []
+        for item in inventory.get("findings", [])[:500]:
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(item.get('severity','UNKNOWN')))}</td>"
+                f"<td>{html.escape(str(item.get('package','unknown')))}</td>"
+                f"<td>{html.escape(str(item.get('cve','unknown')))}</td>"
+                f"<td>{html.escape(str(item.get('installed_version','unknown')))}</td>"
+                f"<td>{html.escape(str(item.get('fixed_version','not published')))}</td>"
+                "</tr>"
+            )
+        counts = inventory.get("counts") or {}
+        summary = " · ".join(
+            f"{level.title()}: {counts.get(level, 0)}"
+            for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+        )
+        return (
+            f"<div class='card'><h3>{html.escape(title)}</h3>"
+            f"<p>{html.escape(summary)} · Coverage: "
+            f"{html.escape(str(inventory.get('coverage','UNKNOWN')))}</p>"
+            "<div style='overflow-x:auto'><table><thead><tr>"
+            "<th>Severity</th><th>Package</th><th>CVE</th>"
+            "<th>Installed</th><th>Fixed</th></tr></thead><tbody>"
+            + ("".join(rows) if rows else "<tr><td colspan='5'>No findings</td></tr>")
+            + "</tbody></table></div></div>"
+        )
+
+    container_inventory = read_inventory("container-vulnerabilities.json")
+    debian_inventory = read_inventory("debian-vulnerabilities.json")
+    try:
+        remediation = (REPORT_DIR / "remediation-prompt.txt").read_text()[:1_000_000]
+    except OSError:
+        remediation = "No remediation prompt is available until scans complete."
+
     severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     findings = sorted(
         findings,
@@ -693,6 +743,18 @@ def security_dashboard():
         <h3>Needs manual review</h3>
         <div class="card">
           <ul>{manual_html or '<li>None</li>'}</ul>
+        </div>
+
+        <h3>Container vulnerability inventory</h3>
+        {inventory_html('Container images', container_inventory)}
+
+        <h3>Debian OS vulnerability inventory</h3>
+        {inventory_html('Debian operating system', debian_inventory)}
+
+        <h3>Copyable manual-remediation prompt</h3>
+        <div class="card">
+          <p>This is planning input only. No automatic upgrade is performed.</p>
+          <textarea readonly style="width:100%;min-height:320px">{html.escape(remediation)}</textarea>
         </div>
 
         <h3>History</h3>

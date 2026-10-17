@@ -51,7 +51,7 @@ A comfortable small installation uses Debian 12, 2 vCPU, 4 GB RAM, 30–40 GB di
 
 ## Quick start
 
-For a blank server, follow the [full installation guide](docs/INSTALLATION-FULL.md). On an existing Docker host:
+For a blank server, follow the **[complete installation guide](INSTALLATION.md)**. On an existing Docker host:
 
 ```bash
 git clone https://github.com/vbian88/news4legends.git
@@ -84,6 +84,7 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 
 ## Documentation
 
+- **[Complete installation from a blank Debian server](INSTALLATION.md)**
 - [Full installation](docs/INSTALLATION-FULL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Profiles and sources](docs/PROFILES-AND-SOURCES.md)
@@ -96,6 +97,7 @@ Telegram is deliberately compact and uses an approximately 4,000-character combi
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Maintenance and security monitoring](docs/MAINTENANCE-SECURITY.md)
 - [Authentication and management API](docs/AUTHENTICATION-API.md)
+- [REST API guide and generated PDF](docs/API-GUIDE.md)
 - [Security](SECURITY.md)
 
 ## Security model

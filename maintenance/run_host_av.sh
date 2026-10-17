@@ -1,13 +1,15 @@
 #!/bin/bash
 set -Eeuo pipefail
-ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-/var/lib/news4legends/maintenance}"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-$SCRIPT_DIR}"
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 
-"$ROOT/scan_host_av.sh" > "$TMP"
+NEWS4LEGENDS_MAINTENANCE_ROOT="$ROOT" "$SCRIPT_DIR/scan_host_av.sh" > "$TMP"
 
 # Send detections even if scan also encountered an error.
-python3 "$ROOT/send_security_event.py" malware < "$TMP"
+NEWS4LEGENDS_MAINTENANCE_ROOT="$ROOT" \
+  python3 "$SCRIPT_DIR/send_security_event.py" malware < "$TMP"
 
 python3 - "$ROOT/reports/clamav-current.json" <<'PY'
 import json, sys

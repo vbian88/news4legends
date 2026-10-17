@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## Security or CTEM dashboards show no data
+
+**What you're doing:** Distinguishing an empty scan from a missing scan.
+
+```bash
+cd /opt/news4legends
+find maintenance/reports -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_container_scan.sh'
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_debian_scan.sh'
+```
+
+**What you should see:** Non-empty current inventory, trend history and
+remediation-prompt files. Missing data is displayed as unavailable, never as
+zero findings.
+
+**If you don't see it:** Confirm the maintenance root is the repository's
+`maintenance` directory, Docker is accessible to the scanner account, Trivy can
+be pulled, and the UI read-only mount points at the same reports directory.
+
+**Don't continue until both inventory files parse as JSON and the scan coverage
+is `COMPLETE` or an understood `PARTIAL`.**
+
 Work from the outside inward and change one thing at a time:
 
 ```text

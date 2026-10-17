@@ -83,6 +83,60 @@ def security(response: Response, user=Depends(require_scope("monitoring.read")))
     }
 
 
+def vulnerability_inventory(name):
+    data = snapshot(name)
+    if data.get("schema_version") != 1:
+        raise HTTPException(503, "Unsupported vulnerability inventory")
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        raise HTTPException(503, "Vulnerability inventory unavailable")
+    return {
+        "source": data.get("source"),
+        "generated_at": data.get("generated_at"),
+        "age_seconds": age(data),
+        "coverage": data.get("coverage", "UNKNOWN"),
+        "counts": data.get("counts", {}),
+        "findings": findings,
+    }
+
+
+@router.get("/monitoring/vulnerabilities/containers")
+def container_vulnerabilities(
+    response: Response,
+    user=Depends(require_scope("monitoring.read")),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return vulnerability_inventory("container-vulnerabilities.json")
+
+
+@router.get("/monitoring/vulnerabilities/debian")
+def debian_vulnerabilities(
+    response: Response,
+    user=Depends(require_scope("monitoring.read")),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return vulnerability_inventory("debian-vulnerabilities.json")
+
+
+@router.get("/monitoring/remediation-prompt", response_class=Response)
+def remediation_prompt(
+    response: Response,
+    user=Depends(require_scope("monitoring.read")),
+):
+    path = REPORTS / "remediation-prompt.txt"
+    try:
+        if not path.is_file() or path.stat().st_size > 1_000_000:
+            raise OSError("missing or oversized")
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(503, "Remediation prompt unavailable")
+    return Response(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/backups")
 def backups(response: Response, user=Depends(require_scope("backups.read"))):
     response.headers["Cache-Control"] = "no-store"

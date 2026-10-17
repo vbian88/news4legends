@@ -1,6 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
-ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-/var/lib/news4legends/maintenance}"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-$SCRIPT_DIR}"
 REPORTS="$ROOT/reports"
 mkdir -p "$REPORTS"
 

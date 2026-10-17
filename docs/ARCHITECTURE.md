@@ -140,4 +140,12 @@ Historical `/run-test`, `/run-roma`, and Roma-specific commands are deliberately
 
 ## Maintenance/security boundary
 
+Host-side zero-LLM scanners write bounded JSON/text reports under
+`maintenance/reports`. The UI mounts that directory read-only. Container,
+Debian OS and application-advisory data remain separate to avoid double
+counting CVEs; missing observations remain unavailable rather than becoming
+zero. The Security page renders current inventories and a manual-remediation
+prompt, while System Health renders timestamped severity trends. Scanner state
+and webhook fingerprints are never mounted writable into the UI.
+
 The host-run `maintenance/` scripts use no LLM. They dynamically query configured running containers for installed versions, obtain public advisories, classify confirmed matches or `UNCERTAIN` cases, and write runtime JSON/text under an ignored reports directory. Compose exposes only that report directory to the UI as a read-only mount. The dashboard cannot execute checks or upgrades.

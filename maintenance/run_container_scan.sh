@@ -1,9 +1,10 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-/var/lib/news4legends/maintenance}"
-REPORTS="$ROOT/reports"
-CACHE="$ROOT/state/trivy-cache"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+DATA_ROOT="${NEWS4LEGENDS_MAINTENANCE_ROOT:-$SCRIPT_DIR}"
+REPORTS="$DATA_ROOT/reports"
+CACHE="$DATA_ROOT/state/trivy-cache"
 mkdir -p "$REPORTS/container-images" "$CACHE"
 
 SCANNER_IMAGE="${N4L_TRIVY_IMAGE:-aquasec/trivy:latest}"
@@ -42,7 +43,7 @@ while IFS= read -r IMAGE; do
       "$SCANNER_IMAGE" image \
         --input /scan/image.tar \
         --scanners vuln \
-        --severity HIGH,CRITICAL \
+        --severity CRITICAL,HIGH,MEDIUM,LOW \
         --format json \
         --output /root/.cache/scan-result.json
 
@@ -104,6 +105,21 @@ PYMERGE
     rm -f "$TMP/image.tar"
 done < "$TMP/images.txt"
 
+shopt -s nullglob
+REPORT_FILES=("$REPORTS"/container-images/*.json)
+if [ "${#REPORT_FILES[@]}" -gt 0 ]; then
+    COVERAGE="COMPLETE"
+    [ -s "$TMP/skipped-images.txt" ] && COVERAGE="PARTIAL"
+    python3 "$SCRIPT_DIR/vulnerability_report.py" \
+      --source container \
+      --reports "${REPORT_FILES[@]}" \
+      --output "$REPORTS/container-vulnerabilities.json" \
+      --history "$REPORTS/container-vulnerability-trends.json" \
+      --coverage "$COVERAGE"
+    NEWS4LEGENDS_MAINTENANCE_ROOT="$DATA_ROOT" \
+      python3 "$SCRIPT_DIR/build_remediation_prompt.py"
+fi
+
 python3 - "$TMP/all-alerts.json" > "$TMP/events.json" <<'PYEVENTS'
 import json, sys
 print(json.dumps({"items": json.load(open(sys.argv[1]))}))
@@ -124,7 +140,8 @@ fi
 if [ "${N4L_SCAN_VALIDATE_ONLY:-0}" = "1" ]; then
     echo "VALIDATION ONLY: Telegram delivery skipped"
 else
-    python3 "$ROOT/send_security_event.py" container < "$TMP/events.json"
+    NEWS4LEGENDS_MAINTENANCE_ROOT="$DATA_ROOT" \
+      python3 "$SCRIPT_DIR/send_security_event.py" container < "$TMP/events.json"
 fi
 
 if [ "$SCAN_PARTIAL" -eq 1 ]; then

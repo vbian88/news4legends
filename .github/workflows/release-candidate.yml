@@ -1,0 +1,132 @@
+name: Release candidate acceptance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install -r docker/ui/requirements.txt -r docker/worker/requirements.txt httpx2
+          python -m pip check
+      - name: Validate source and tests
+        run: |
+          python -m compileall -q ui worker maintenance health scripts tests
+          python -m unittest discover -s tests -v
+          python -m json.tool n8n/workflow.example.json >/dev/null
+          python -m json.tool docs/openapi.json >/dev/null
+          bash -n maintenance/*.sh scripts/*.sh
+
+  docker-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEWS4LEGENDS_UI_PORT: "8081"
+      N8N_PORT: "31002"
+      TZ: "UTC"
+      LLM_API_URL: "http://127.0.0.1:9/v1/chat/completions"
+      LLM_MODEL: "acceptance-placeholder"
+      LLM_API_KEY: "acceptance-placeholder"
+      N8N_EDITOR_BASE_URL: "http://127.0.0.1:31002"
+      WEBHOOK_URL: "http://127.0.0.1:31002/"
+      NEWS4LEGENDS_COOKIE_SECURE: "false"
+      N8N_SECURE_COOKIE: "false"
+      MAINTENANCE_REPORTS_DIR: "./maintenance/reports"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare runtime directories
+        run: |
+          mkdir -p maintenance/reports maintenance/state assets acceptance
+          cp maintenance/config.example.json maintenance/config.json
+      - name: Validate Compose and build every image
+        run: |
+          docker compose config --quiet
+          docker compose build news4legends-ui news4legends-worker
+          docker compose --profile tools build news4legends-pdf-builder
+      - name: Start and verify services
+        run: |
+          docker compose up -d
+          for attempt in $(seq 1 60); do
+            curl --fail --silent http://127.0.0.1:8081/health >/dev/null && break
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:8081/health
+          docker compose exec -T news4legends-worker python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8080/health').status == 200"
+          docker compose ps
+      - name: Initialize administrator and test browser login
+        run: |
+          admin_password=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          docker compose run --rm \
+            -e NEWS4LEGENDS_ADMIN_USERNAME=acceptance-admin \
+            -e NEWS4LEGENDS_ADMIN_PASSWORD="$admin_password" \
+            news4legends-ui python setup_admin.py
+          curl -sS -c acceptance/cookies.txt http://127.0.0.1:8081/login > acceptance/login.html
+          csrf=$(python - <<'PY'
+          import re
+          print(re.search(r'name="csrf_token" value="([^"]+)"', open('acceptance/login.html').read()).group(1))
+          PY
+          )
+          curl --fail -sS -b acceptance/cookies.txt -c acceptance/cookies.txt \
+            -X POST http://127.0.0.1:8081/login \
+            --data-urlencode "username=acceptance-admin" \
+            --data-urlencode "password=$admin_password" \
+            --data-urlencode "csrf_token=$csrf" -o /dev/null
+          curl --fail -sS -b acceptance/cookies.txt http://127.0.0.1:8081/ | grep -q "News 4 Legends"
+      - name: Verify SQLite and persistence after recreation
+        run: |
+          docker compose exec -T news4legends-ui python - <<'PY'
+          import sqlite3
+          db=sqlite3.connect('/data/home-ai-news.db')
+          assert db.execute('PRAGMA user_version').fetchone()[0] == 2
+          assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+          assert db.execute("SELECT username FROM auth_users WHERE username='acceptance-admin'").fetchone()
+          PY
+          docker compose up -d --force-recreate news4legends-ui news4legends-worker
+          docker compose exec -T news4legends-ui python - <<'PY'
+          import sqlite3
+          db=sqlite3.connect('/data/home-ai-news.db')
+          assert db.execute("SELECT username FROM auth_users WHERE username='acceptance-admin'").fetchone()
+          PY
+      - name: Generate API PDF
+        run: |
+          docker compose --profile tools run --rm news4legends-pdf-builder
+          test -s assets/News-4-Legends-REST-API-Guide.pdf
+          head -c 5 assets/News-4-Legends-REST-API-Guide.pdf | grep -q '%PDF-'
+      - name: Backup and restore into an isolated volume
+        run: |
+          mkdir -p acceptance/backups
+          docker compose run --rm --no-deps \
+            -v "$PWD/scripts:/scripts:ro" -v "$PWD/acceptance/backups:/backups" \
+            -e NEWS4LEGENDS_BACKUP_DIR=/backups \
+            news4legends-ui /scripts/backup.sh
+          backup=$(find acceptance/backups -name '*.sqlite3' -type f -print -quit)
+          test -n "$backup"
+          docker volume create n4l_acceptance_restore
+          docker run --rm -v n4l_acceptance_restore:/data \
+            -v "$PWD/scripts:/scripts:ro" -v "$PWD/acceptance/backups:/backups:ro" \
+            -e NEWS4LEGENDS_DB_PATH=/data/home-ai-news.db \
+            news4legends-ui:local /scripts/restore.sh "/backups/$(basename "$backup")"
+          docker run --rm -v n4l_acceptance_restore:/data news4legends-ui:local python - <<'PY'
+          import sqlite3
+          db=sqlite3.connect('/data/home-ai-news.db')
+          assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+          assert db.execute("SELECT username FROM auth_users WHERE username='acceptance-admin'").fetchone()
+          PY
+      - name: Diagnostics
+        if: always()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=150 || true
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v --remove-orphans || true

@@ -1125,6 +1125,25 @@
         ]
       }
     },
+    "/api/v1/monitoring/remediation-prompt": {
+      "get": {
+        "operationId": "remediation_prompt_api_v1_monitoring_remediation_prompt_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remediation Prompt",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
     "/api/v1/monitoring/security": {
       "get": {
         "operationId": "security_api_v1_monitoring_security_get",
@@ -1144,6 +1163,54 @@
           }
         ],
         "summary": "Security",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/api/v1/monitoring/vulnerabilities/containers": {
+      "get": {
+        "operationId": "container_vulnerabilities_api_v1_monitoring_vulnerabilities_containers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Container Vulnerabilities",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/api/v1/monitoring/vulnerabilities/debian": {
+      "get": {
+        "operationId": "debian_vulnerabilities_api_v1_monitoring_vulnerabilities_debian_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Debian Vulnerabilities",
         "tags": [
           "Observability"
         ]

@@ -77,8 +77,8 @@ class ApplicationIntegrationTests(unittest.TestCase):
             method in {"get", "post", "put", "patch", "delete"}
             for methods in contract["paths"].values() for method in methods
         )
-        self.assertEqual(50, len(contract["paths"]))
-        self.assertEqual(66, operations)
+        self.assertEqual(53, len(contract["paths"]))
+        self.assertEqual(69, operations)
 
 
 if __name__ == "__main__":

@@ -247,7 +247,8 @@ stat -c '%a %n' .env
 ```bash
 cd /opt/news4legends
 docker compose config --quiet
-docker compose build
+docker compose build news4legends-ui news4legends-worker
+docker compose --profile tools build news4legends-pdf-builder
 docker compose up -d
 docker compose ps
 ```
@@ -257,6 +258,14 @@ docker compose ps
 **If you don't see it:** Run `docker compose logs --tail=100 SERVICE_NAME`. Common causes are a missing secret, malformed `.env`, occupied host ports, or failed dependency installation.
 
 **Don't continue until all services remain running.**
+
+Generate and verify the API PDF with the isolated builder:
+
+```bash
+mkdir -p assets
+docker compose --profile tools run --rm news4legends-pdf-builder
+test -s assets/News-4-Legends-REST-API-Guide.pdf
+```
 
 ### Verify UI and database bootstrap
 

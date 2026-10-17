@@ -1,0 +1,523 @@
+# News 4 Legends v2 — Complete installation guide
+
+This guide starts with a blank Debian 12 or Debian 13 server and finishes with a tested, scheduled News 4 Legends installation and a verified backup. It assumes no Docker knowledge. News 4 Legends lets you choose what deserves attention, then leave collection and briefing to the machine; the goal is to make it safe to consume less news.
+
+The published UI port `8081` uses direct HTTP. That is intended only for a trusted LAN or private VPN. **Do not expose port 8081, the worker, or n8n directly to the public Internet.** Internet-facing access requires an operator-managed HTTPS reverse proxy, secure cookies, authentication controls and firewall policy. Caddy is not required by News 4 Legends.
+
+## 1. Plan the installation
+
+Use a private server or VM with a comfortable starting size of 2 vCPU, 4 GB RAM, and 30–40 GB disk. A smaller system may work for few sources, but collection and builds can spike CPU, memory, and disk. No GPU is needed when using a remote LLM.
+
+You need:
+
+- Debian 12 or Debian 13 with an administrator account that can use `sudo`
+- a stable LAN address or DHCP reservation
+- SSH access from an administrator laptop
+- an OpenAI-compatible chat-completions URL, model name, and API key
+- optional SMTP email and/or Telegram delivery accounts
+
+Placeholders used below:
+
+| Placeholder | Replace with |
+| --- | --- |
+| `NEWS_SERVER_IP` | Server LAN IP or resolvable hostname |
+| `ADMIN_USER` | Debian administrator username |
+| `vbian88` | GitHub repository owner |
+| `LLM_URL` | Full chat-completions URL |
+| `LLM_MODEL_NAME` | Provider/gateway model identifier |
+
+Do not paste literal placeholders into production configuration.
+
+## 2. Prepare Debian
+
+### Set a hostname
+
+**What you're doing:** Giving the server a recognizable local name.
+
+**Command — News 4 Legends server:**
+
+```bash
+sudo hostnamectl set-hostname news4legends
+hostnamectl
+```
+
+**What you should see:** `Static hostname: news4legends`.
+
+**If you don't see it:** Confirm the command used `sudo`; log out and reconnect if the shell prompt is stale.
+
+**Don't continue until this works.**
+
+### Stabilize the network address
+
+Prefer a DHCP reservation in your router for the server's MAC address. Debian static-network configuration varies by installer and network manager, so do not copy an interface name blindly.
+
+**What you're doing:** Recording the current address before reserving it.
+
+**Command — server:**
+
+```bash
+ip -brief address
+ip route
+```
+
+**What you should see:** A LAN address on the active interface and a `default via` route.
+
+**If you don't see it:** Repair basic networking before continuing. Test `ping -c 3 deb.debian.org`.
+
+**Don't continue until DNS and outbound Internet access work.**
+
+### Verify SSH
+
+**What you're doing:** Ensuring administration survives closing the VM console.
+
+**Command — administrator laptop:**
+
+```bash
+ssh ADMIN_USER@NEWS_SERVER_IP
+```
+
+**What you should see:** A shell prompt on the server.
+
+**If you don't see it:** On the server console run `sudo systemctl status ssh`; install with `sudo apt install openssh-server` if absent. Check the address and firewall.
+
+**Don't continue until a new SSH session works.**
+
+### Set timezone and update Debian
+
+**Command — server:**
+
+```bash
+sudo timedatectl set-timezone Europe/London
+timedatectl
+sudo apt update
+sudo apt full-upgrade -y
+sudo reboot
+```
+
+Replace `Europe/London` if needed.
+
+**What you should see:** The requested timezone, successful package operations, and SSH access after reboot.
+
+**If you don't see it:** Resolve apt errors or boot/network issues at the console.
+
+**Don't continue until the server is current and reachable after reboot.**
+
+## 3. Install Docker Engine and Compose
+
+These commands follow Docker's official Debian apt-repository method. Docker packaging can change; compare with the current official Docker Debian instructions before a future publication.
+
+### Remove conflicting packages
+
+**Command — server:**
+
+```bash
+for pkg in docker.io docker-doc docker-compose docker-buildx podman-docker containerd runc; do sudo apt-get remove -y "$pkg"; done
+```
+
+It is acceptable for apt to say some packages are not installed.
+
+### Add Docker's signing key and repository
+
+**Command — server:**
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt-get update
+```
+
+**What you should see:** `apt-get update` reads `download.docker.com` without key errors.
+
+**If you don't see it:** Check system time, DNS, `/etc/os-release`, the key file, and repository line.
+
+**Don't continue until apt accepts the repository.**
+
+Docker-published ports can bypass some `ufw`/`firewalld` expectations. Keep the services on a trusted network and design firewall policy with Docker's `DOCKER-USER` chain rather than assuming a host firewall automatically protects published container ports.
+
+### Install and verify Docker
+
+**Command — server:**
+
+```bash
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin git
+sudo systemctl enable --now docker
+sudo systemctl status docker --no-pager
+sudo docker run --rm hello-world
+sudo docker compose version
+```
+
+**What you should see:** Docker is `active (running)`, Hello World succeeds, and Compose prints a v2 version.
+
+**If you don't see it:** Inspect `sudo journalctl -u docker --no-pager -n 100`. Do not install the obsolete standalone `docker-compose` binary as a workaround.
+
+**Don't continue until both verification commands pass.**
+
+Optional non-root access:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and in, then run `docker version`. Membership in the `docker` group is effectively root-level access; omit it and retain `sudo` if that is preferable. Remaining commands assume your account can run `docker`.
+
+## 4. Obtain and inspect the repository
+
+**What you're doing:** Checking out the public source into `/opt/news4legends`.
+
+**Command — server, after publication:**
+
+```bash
+sudo git clone https://github.com/vbian88/news4legends.git /opt/news4legends
+sudo chown -R "$USER":"$USER" /opt/news4legends
+cd /opt/news4legends
+find . -maxdepth 2 -type f | sort
+```
+
+**What you should see:** `compose.yml`, `.env.example`, `config`, `docker`, `ui`, `worker`, `n8n`, and `docs`.
+
+**If you don't see it:** Confirm repository URL/access and that `/opt/news4legends` was not already a non-empty directory.
+
+**Don't continue until the expected tree is present.**
+
+If using the pre-publication archive, securely copy it to the server, extract it, move the extracted `news4legends-public` directory to `/opt/news4legends`, and set ownership. Do not initialize or clone into a production source tree.
+
+## 5. Configure the environment and secret
+
+### Create `.env`
+
+**Command — server:**
+
+```bash
+cd /opt/news4legends
+cp .env.example .env
+nano .env
+```
+
+Set at least:
+
+```dotenv
+NEWS4LEGENDS_UI_PORT=8081
+N8N_PORT=31002
+TZ=Europe/London
+LLM_API_URL=LLM_URL
+LLM_MODEL=LLM_MODEL_NAME
+LLM_API_KEY=PASTE_KEY_LOCALLY
+N8N_EDITOR_BASE_URL=http://NEWS_SERVER_IP:31002
+WEBHOOK_URL=http://NEWS_SERVER_IP:31002/
+```
+
+OmniRoute is a known working gateway but is not mandatory. The endpoint must accept OpenAI-compatible chat-completions requests. Internal code receives these public variables as historical `OMNIROUTE_*` environment names.
+
+**What you should see:** `grep -n 'NEWS_SERVER_IP\|LLM_URL\|LLM_MODEL_NAME' .env` returns nothing.
+
+**If you don't see it:** Reopen `.env` and replace every placeholder. Do not print or commit the API key.
+
+**Don't continue until all placeholders are replaced.**
+
+### Protect the local environment file
+
+**Command — server:**
+
+```bash
+chmod 600 .env
+test -s .env
+git check-ignore .env
+stat -c '%a %n' .env
+```
+
+**What you should see:** `.env` is ignored and has mode `600`.
+
+**If you don't see it:** Correct the permissions and confirm `.gitignore` excludes `.env`.
+
+**Don't continue until it is non-empty, mode 600, and excluded by Git.**
+
+## 6. Validate and start the stack
+
+**Command — server:**
+
+```bash
+cd /opt/news4legends
+docker compose config --quiet
+docker compose build news4legends-ui news4legends-worker
+docker compose --profile tools build news4legends-pdf-builder
+docker compose up -d
+docker compose ps
+```
+
+**What you should see:** All three services running: `news4legends-ui`, `news4legends-worker`, and `n8n`.
+
+**If you don't see it:** Run `docker compose logs --tail=100 SERVICE_NAME`. Common causes are a missing secret, malformed `.env`, occupied host ports, or failed dependency installation.
+
+**Don't continue until all services remain running.**
+
+Generate and verify the bundled API reference after the UI source is built:
+
+```bash
+mkdir -p assets
+docker compose --profile tools run --rm news4legends-pdf-builder
+test -s assets/News-4-Legends-REST-API-Guide.pdf
+```
+
+The PDF is also generated dynamically for authenticated administrators at
+`/api-guide.pdf`.
+
+### Verify UI and database bootstrap
+
+**Command — server:**
+
+```bash
+curl --fail http://127.0.0.1:8081/health
+docker compose exec news4legends-ui python - <<'PY'
+import sqlite3
+db=sqlite3.connect('/data/home-ai-news.db')
+print(db.execute('PRAGMA user_version').fetchone()[0])
+print([r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")])
+PY
+```
+
+**What you should see:** A healthy response, schema version `2`, the original control-plane tables and the authentication/API tables documented in [Architecture](docs/ARCHITECTURE.md).
+
+**If you don't see it:** Read UI logs. The bootstrap deliberately refuses unexpected schemas instead of modifying them blindly.
+
+**Don't continue until schema version and table list are correct.**
+
+The UI path `/data/home-ai-news.db` and worker path `/config/home-ai-news.db` address the same Docker volume; the worker mount is read-only.
+
+### Create the first administrator
+
+**What you're doing:** Creating the only initial account interactively, without a default password or stored setup secret.
+
+```bash
+docker compose run --rm news4legends-ui python setup_admin.py
+```
+
+**What you should see:** `Administrator created. The password was not written to disk.`
+
+**If you don't see it:** Read the UI logs and verify the shared data volume is writable. If an administrator already exists, use `reset_admin.py` as described in troubleshooting.
+
+**Don't continue until you can sign in with the new administrator account.**
+
+### Verify worker health
+
+**Command — server:**
+
+```bash
+docker compose exec news4legends-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').read().decode())"
+```
+
+**What you should see:** JSON containing `"status": "ok"`.
+
+**If you don't see it:** Run `docker compose logs --tail=100 news4legends-worker` and verify the container is running.
+
+**Don't continue until health succeeds.**
+
+## 7. Create the first profile
+
+On a laptop, open `http://NEWS_SERVER_IP:8081`.
+
+1. Create a neutral test profile such as `Local News`.
+2. Set a unique slug, topic, optional keywords, and **Stories in digest** from 1–10.
+3. Keep a sensible maximum age; source workload budgets are configured when you add each source.
+4. Add a source name and its listing page URL (not an individual article URL).
+5. Set collector type `web`, user-defined source weight, and limits.
+6. Validate the source.
+7. Review the result. `WARNING` can be usable but demands review; `FAIL` must not be relied upon.
+8. Enable the source, then enable the profile.
+
+Changing a source's listing URL or collector type disables it and clears validation. Revalidate it. See [Profiles and sources](docs/PROFILES-AND-SOURCES.md).
+
+**What you should see:** The profile is enabled and has at least one enabled source with `PASS` or deliberately accepted `WARNING`.
+
+**If you don't see it:** Use the UI guidance; confirm the source is reachable from the server and is a conventional HTML listing page.
+
+**Don't continue until a valid source allows the profile to be enabled.**
+
+## 8. Run the intelligence pipeline once
+
+First check that no run is already active:
+
+```bash
+docker top news4legends-worker -eo pid,ppid,etime,stat,cmd
+```
+
+Then invoke the bodyless endpoint from the control network:
+
+```bash
+docker compose exec news4legends-worker python - <<'PY'
+import json, urllib.request
+r=urllib.request.Request('http://127.0.0.1:8080/run', method='POST', data=b'')
+with urllib.request.urlopen(r, timeout=3700) as x:
+    d=json.load(x)
+print('profiles_processed:', d.get('profiles_processed'))
+print('email characters:', len(d.get('email','')))
+print('telegram characters:', len(d.get('telegram','')))
+PY
+```
+
+**What you should see:** At least one processed profile and non-empty delivery content when matching articles exist.
+
+**If you don't see it:** Do not add a profile body. Follow [Troubleshooting](docs/TROUBLESHOOTING.md) through profile discovery, collection, and LLM access. Worker child output is captured, so use `docker top` to see live process state.
+
+**Don't continue until a controlled run succeeds.**
+
+## 9. Configure n8n
+
+Open `http://NEWS_SERVER_IP:31002` and complete n8n's owner setup. Protect the account credentials.
+
+Import `n8n/workflow.example.json`. Verify the HTTP node exactly:
+
+- Method: `POST`
+- URL: `http://news4legends-worker:8080/run`
+- Authentication: none
+- Query parameters, headers, and body: off
+- Timeout: `3600000` ms (1 hour)
+
+Both delivery nodes are intentionally disabled. Configure [Telegram](docs/TELEGRAM.md), [SMTP email](docs/SMTP.md), or both. For email use HTML mode and `{{ $json.email }}`; for Telegram use `{{ $json.telegram }}`.
+
+Execute the HTTP node manually.
+
+**What you should see:** `profiles_processed`, `email`, and `telegram` in output JSON.
+
+**If you don't see it:** Verify the worker health from within its container and the service DNS name. A complete run can take minutes.
+
+**Don't continue until the HTTP node succeeds.**
+
+Configure and manually test at least one delivery node. Then set the desired schedule and timezone, activate the workflow, and click **Publish**. An editor change is not guaranteed to affect scheduled execution until published.
+
+## 10. Configure SMTP email
+
+Follow the complete [SMTP email guide](docs/SMTP.md). Create the SMTP credential inside n8n, configure an authorized From address and controlled recipient, set the email format to HTML, and use `{{ $json.email }}` as the HTML body. Keep the password or App Password inside n8n credentials; never put it in workflow JSON, `.env.example`, documentation or Git.
+
+Execute the email node manually and confirm delivery before enabling it. Then publish the workflow. Gmail OAuth and its localhost callback tunnel are not part of the current public delivery architecture.
+
+## 11. Reboot acceptance test
+
+**Command — server:**
+
+```bash
+sudo reboot
+```
+
+After reconnecting:
+
+```bash
+cd /opt/news4legends
+docker compose ps
+curl --fail http://127.0.0.1:8081/health
+docker compose exec news4legends-worker python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health').status)"
+```
+
+**What you should see:** All services restarted automatically; both checks pass; profiles and n8n workflow/credentials remain present.
+
+**If you don't see it:** Check Docker service state, container logs, volume mounts, and restart policies.
+
+**Don't continue until persistence survives reboot.**
+
+## 12. Create and verify a backup
+
+Follow [Backup and restore](docs/BACKUP-RESTORE.md). At minimum protect SQLite, the full n8n volume, `.env`, the LLM secret, and customized files. Use SQLite's backup API rather than copying a live database blindly, and stop n8n while archiving its volume.
+
+For every output verify existence, non-zero size, recent timestamp, and checksum. Then perform the documented isolated restore drill. Backup archives contain credentials and are not automatically encrypted.
+
+## 13. Configure maintenance and security reports
+
+**What you're doing:** Preparing ignored runtime directories and generating the first zero-LLM security report.
+
+**Command — server:**
+
+```bash
+cd /opt/news4legends
+cp maintenance/config.example.json maintenance/config.json
+mkdir -p maintenance/reports maintenance/state
+chmod 700 maintenance/reports maintenance/state
+./maintenance/run.sh manual
+docker compose up -d --build news4legends-ui
+```
+
+**What you should see:** The command ends with `ALERT=NO MODE=MANUAL`, `maintenance/reports/current.json` exists, and `http://NEWS_SERVER_IP:8081/security` displays the read-only report. Installed versions are discovered from running containers; they are not copied from this guide.
+
+**If you don't see it:** Read the `VERSION DISCOVERY ERRORS` section, confirm the configured container names and version commands, and verify that your account can run `docker exec`. A failed or ambiguous version check must remain visible; do not replace it with a guessed version.
+
+**Don't continue until a manual report is produced and the dashboard can read it.**
+
+Follow [Maintenance and security monitoring](docs/MAINTENANCE-SECURITY.md) before enabling scheduled or weekly modes. No automatic upgrades are performed.
+
+### Install container and Debian vulnerability scans
+
+**What you're doing:** Enabling persistent, zero-LLM Trivy inventories for running container images and the Debian host. The scanners report only; they never update packages or images.
+
+```bash
+cd /opt/news4legends
+sudo install -d -m 700 /etc/news4legends
+sudo install -m 600 maintenance/security.env.example /etc/news4legends/security.env
+sudo nano /etc/news4legends/security.env
+sudo ./scripts/install-security-schedule.sh
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_container_scan.sh'
+sudo bash -c 'set -a; source /etc/news4legends/security.env; set +a; exec ./maintenance/run_debian_scan.sh'
+```
+
+Set `NEWS4LEGENDS_MAINTENANCE_ROOT=/opt/news4legends/maintenance`. Leave `N4L_SECURITY_WEBHOOK_URL` empty initially. If you later configure a private n8n webhook for Telegram security summaries, enter it only in this protected file; never put it in Git or a workflow export.
+
+**What you should see:** Current container and Debian inventory JSON, two trend-history files, and `remediation-prompt.txt` under `maintenance/reports`. The Security and System Health pages show Critical, High, Medium and Low counts with observation timestamps.
+
+**If you don't see it:** Inspect the scan logs under `maintenance/reports`, confirm Trivy can be pulled, and confirm the protected environment file uses an absolute path. Partial or absent data must remain visibly partial or unavailable; it must never be interpreted as zero vulnerabilities.
+
+**Don't continue until both inventories exist and both dashboards render them.**
+
+### Test deduplicated security notifications
+
+Configure a disposable n8n webhook that sends to a test Telegram chat, set its URL in `/etc/news4legends/security.env`, then run the same scanner twice without changing its input. The first run may send one summary for each new Critical or High finding; the second must not repeat identical events. Remove the test destination before enabling normal scheduling. Medium and Low findings remain visible but do not trigger urgent summaries.
+
+## 14. Update, troubleshoot and safely uninstall
+
+For upgrades, follow the backup-first [upgrade guide](docs/UPGRADING.md). Never
+pull `n8nio/n8n:latest` casually: record the current image ID, read release
+notes, back up the complete n8n volume, and test the candidate first. Use the
+[troubleshooting guide](docs/TROUBLESHOOTING.md) for service, database,
+collector, LLM and delivery failures.
+
+To stop the application without deleting persistent data:
+
+```bash
+cd /opt/news4legends
+docker compose down
+```
+
+To uninstall, first complete and verify the [backup procedure](docs/BACKUP-RESTORE.md),
+remove `/etc/cron.d/news4legends-security`, and run `docker compose down`.
+Retain the repository, `.env`, SQLite backup, n8n archive and recorded image
+IDs until a restore drill succeeds. `docker compose down -v` permanently
+deletes the named SQLite, worker-runtime and n8n volumes and is deliberately
+not part of the routine uninstall command.
+
+## 15. Final acceptance checklist
+
+- [ ] Debian is updated and SSH works after reboot.
+- [ ] Docker Engine and Compose v2 pass verification.
+- [ ] `.env` has no placeholders, contains the locally supplied LLM key, is ignored, and has mode 600.
+- [ ] Compose validates and three services stay running.
+- [ ] UI and worker health checks pass.
+- [ ] SQLite schema version is 2; control-plane, authentication and API tables are present.
+- [ ] Administrator login, logout, CSRF checks and user management work.
+- [ ] At least one enabled profile has a validated, enabled source.
+- [ ] A bodyless `/run` processes the profile.
+- [ ] Chosen delivery channel succeeds manually.
+- [ ] Schedule/timezone are correct; workflow is active and Published.
+- [ ] State survives a reboot.
+- [ ] Backup files are non-empty, recent, checksummed, and access-restricted.
+- [ ] An isolated restore test has succeeded.
+- [ ] A manual maintenance report exists and the read-only Security dashboard loads.
+- [ ] UI, worker, and n8n are not directly exposed to the public Internet.
+
+The system is not accepted merely because containers are green: accept it only after a real briefing arrives through the chosen channel and a restore has been tested.

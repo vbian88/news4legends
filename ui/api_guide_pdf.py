@@ -15,8 +15,7 @@ from reportlab.platypus import (
 router = APIRouter(tags=["Documentation"])
 
 
-@router.get("/api-guide.pdf", include_in_schema=False)
-def api_guide_pdf():
+def build_api_guide():
     from app import app
     from api_tokens import SCOPES
 
@@ -142,9 +141,14 @@ def api_guide_pdf():
     ])
 
     doc.build(story)
-    output.seek(0)
+    return output.getvalue()
+
+
+@router.get("/api-guide.pdf", include_in_schema=False)
+def api_guide_pdf():
+    content = build_api_guide()
     return StreamingResponse(
-        output,
+        BytesIO(content),
         media_type="application/pdf",
         headers={
             "Content-Disposition":

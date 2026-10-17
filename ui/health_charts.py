@@ -17,76 +17,164 @@ def fmt(value):
     return f"{value:,.2f}" if value is not None else "N/A"
 
 def chart(name, current, samples):
+    """System Health chart with observed-time X axis and numeric Y axis."""
+    from datetime import datetime
+
     now = time.time()
     points = sorted(
         (float(t), float(v))
         for t, v in samples
         if isinstance(t, (int, float))
         and isinstance(v, (int, float))
+        and math.isfinite(t)
         and math.isfinite(v)
         and now - WINDOW <= t <= now + 60
     )
+
     if not points:
-        return f'<article class="metric"><h3>{e(name)}</h3><p>No historical samples</p></article>'
+        return (
+            f'<article class="metric"><h3>{e(name)}</h3>'
+            '<p>No historical samples</p></article>'
+        )
 
     values = [v for _, v in points]
     avg = sum(values) / len(values)
     low, high = min(values), max(values)
-    pad = max((high - low) * .15, abs(avg) * .01, .01)
-    bottom, top = low - pad, high + pad
-    start, end = now - WINDOW, now
+
+    binary = (
+        name.startswith("container.")
+        or name in (
+            "docker.query_ok",
+            "worker.available",
+            "backup.success_marker",
+        )
+    )
+    percent = name.endswith("_pct") or name.endswith(".pct")
+
+    if binary:
+        bottom, top = 0.0, 1.0
+    elif percent:
+        bottom, top = 0.0, 100.0
+    else:
+        spread = high - low
+        pad = max(spread * 0.15, abs(avg) * 0.01, 0.01)
+        bottom, top = low - pad, high + pad
+
+    # Scale X to the timestamps actually observed, rather than forcing
+    # short histories into the right edge of a 30-day canvas.
+    first, last = points[0][0], points[-1][0]
+    if last <= first:
+        first -= 1800
+        last += 1800
+
+    left, right = 80.0, 700.0
+    upper, lower = 22.0, 166.0
 
     def x(t):
-        return 35 + 665 * (t - start) / (end - start)
+        return left + (right - left) * (t - first) / (last - first)
 
     def y(v):
-        return 170 - 135 * (v - bottom) / (top - bottom)
+        return lower - (lower - upper) * (v - bottom) / (top - bottom)
+
+    def number(v):
+        if percent:
+            return f"{v:.0f}%"
+        if binary:
+            return f"{v:.2f}"
+        if abs(v) >= 1000:
+            return f"{v:,.0f}"
+        if abs(v) >= 10:
+            return f"{v:.1f}"
+        return f"{v:.2f}"
+
+    grid = []
+    for i in range(5):
+        value = bottom + (top - bottom) * i / 4
+        yy = y(value)
+        grid.append(
+            f'<line x1="{left}" y1="{yy:.1f}" '
+            f'x2="{right}" y2="{yy:.1f}" '
+            'stroke="#64748b" stroke-opacity=".35" '
+            'stroke-dasharray="3 5"/>'
+            f'<text x="72" y="{yy + 4:.1f}" '
+            'fill="#aeb8c5" font-size="11" '
+            f'text-anchor="end">{e(number(value))}</text>'
+        )
+
+    # Every label is derived from a timestamp, not the current date
+    # or an assumed thirty-day-old observation.
+    span = last - first
+    date_format = "%d-%m-%Y %H:%M"
+
+    for i in range(5):
+        timestamp = first + span * i / 4
+        xx = left + (right - left) * i / 4
+        label = datetime.fromtimestamp(timestamp).strftime(date_format)
+        anchor = "start" if i == 0 else (
+            "end" if i == 4 else "middle"
+        )
+        grid.append(
+            f'<line x1="{xx:.1f}" y1="{upper}" '
+            f'x2="{xx:.1f}" y2="{lower}" '
+            'stroke="#64748b" stroke-opacity=".18"/>'
+            f'<text x="{xx:.1f}" y="191" '
+            f'fill="#aeb8c5" font-size="10" '
+            f'text-anchor="end" transform="rotate(-45 {xx:.1f} 191)">{e(label)}</text>'
+        )
 
     coordinates = " ".join(
         f"{x(t):.1f},{y(v):.1f}" for t, v in points
     )
-    average_y = y(avg)
-    latest = float(current) if isinstance(current, (int, float)) else values[-1]
-    coverage = (points[-1][0] - points[0][0]) / 86400
-    binary = (
-        name.startswith("container.")
-        or name in ("docker.query_ok", "worker.available",
-                    "backup.success_marker")
-    )
-    average_display = f"{avg * 100:.1f}% passing" if binary else fmt(avg)
-    latest_display = "Healthy" if binary and latest == 1 else (
-        "Failed" if binary else fmt(latest)
+
+    latest = (
+        float(current)
+        if isinstance(current, (int, float))
+        and math.isfinite(current)
+        else values[-1]
     )
 
-    return f'''
+    def display(v):
+        if binary:
+            return "Healthy" if v == 1 else "Failed"
+        return f"{v:.2f}"
+
+    average_display = (
+        f"{avg * 100:.1f}% passing" if binary else f"{avg:.2f}"
+    )
+    coverage = max(0.0, (points[-1][0] - points[0][0]) / 86400)
+
+    # The average is drawn against the same numeric Y scale.
+    average_y = y(avg)
+    guides = "".join(grid)
+
+    return f"""
     <article class="metric">
       <h3>{e(name)}</h3>
       <div class="stats">
-        <span>Now <strong>{e(latest_display)}</strong></span>
+        <span>Now <strong>{e(display(latest))}</strong></span>
         <span>30-day average <strong>{e(average_display)}</strong></span>
-        <span>Min <strong>{fmt(low)}</strong></span>
-        <span>Max <strong>{fmt(high)}</strong></span>
+        <span>Min <strong>{low:.2f}</strong></span>
+        <span>Max <strong>{high:.2f}</strong></span>
         <span>Samples <strong>{len(points)}</strong></span>
       </div>
-      <svg viewBox="0 0 730 210" role="img"
-           aria-label="Observed values and 30-day average for {e(name)}">
-        <line x1="35" y1="170" x2="700" y2="170"
-              stroke="#64748b" stroke-width="1"/>
-        <line x1="35" y1="{average_y:.1f}" x2="700"
-              y2="{average_y:.1f}" stroke="#d8ad62"
-              stroke-width="2" stroke-dasharray="9 6"/>
+      <svg viewBox="0 0 730 265" role="img"
+           aria-label="Numeric metric values over actual observation dates for {e(name)}">
+        {guides}
+        <line x1="{left}" y1="{average_y:.1f}"
+              x2="{right}" y2="{average_y:.1f}"
+              stroke="#d8ad62" stroke-width="2"
+              stroke-dasharray="9 6"/>
         <polyline points="{coordinates}" fill="none"
                   stroke="#55c7b0" stroke-width="2.5"
                   stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="{x(points[-1][0]):.1f}"
-                cy="{y(points[-1][1]):.1f}" r="4" fill="#55c7b0"/>
-        <text x="35" y="193" fill="#aeb8c5" font-size="12">30 days ago</text>
-        <text x="700" y="193" fill="#aeb8c5" font-size="12"
-              text-anchor="end">Now</text>
+                cy="{y(points[-1][1]):.1f}"
+                r="4" fill="#55c7b0"/>
       </svg>
-      <p class="note">Rolling 30-day window · {coverage:.2f} days of observed history
-      · partial baseline until 30 days collected</p>
-    </article>'''
+      <p class="note">Rolling 30-day sample window ·
+      {coverage:.2f} days of observed history ·
+      horizontal axis shows actual observation dates</p>
+    </article>"""
 
 
 def security_monitoring():
@@ -166,6 +254,208 @@ def security_monitoring():
         '</article></div></section>'
     )
 
+
+
+def ctem_trends():
+    """Unified vulnerability view with separately identified sources."""
+    reports = REPORTS
+    container_path = reports / "container-vulnerability-trends.json"
+    application_history = reports / "history"
+
+    try:
+        container = json.loads(container_path.read_text()).get("items", [])
+    except (OSError, ValueError, TypeError):
+        container = []
+
+    application = []
+    if application_history.is_dir():
+        for path in sorted(application_history.glob("*.json"))[-90:]:
+            try:
+                data = json.loads(path.read_text())
+                counts = data.get("counts") or {}
+                if not isinstance(counts, dict):
+                    continue
+                stamp = data.get("generated_at")
+                if isinstance(stamp, (int, float)):
+                    date = datetime.fromtimestamp(stamp).strftime("%d-%m-%Y %H:%M")
+                elif isinstance(stamp, str):
+                    date = stamp[:10]
+                else:
+                    date = path.stem[:10]
+                application.append({
+                    "date": date,
+                    "counts": {
+                        level: counts.get(level, counts.get(level.lower(), 0))
+                        for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+                    },
+                    "manual_review": len(data.get("manual_review") or []),
+                })
+            except (OSError, ValueError, TypeError):
+                continue
+
+    try:
+        debian_data = json.loads(
+            (reports / "debian-vulnerability-trends.json").read_text()
+        )
+        if debian_data.get("schema_version") != 1:
+            raise ValueError("Unsupported Debian history")
+        debian = debian_data["items"]
+    except (OSError, ValueError, KeyError, TypeError):
+        debian = []
+
+    levels = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+    colors = {
+        "CRITICAL": "#f87171",
+        "HIGH": "#fb923c",
+        "MEDIUM": "#facc15",
+        "LOW": "#55c7b0",
+    }
+
+    def source_table(title, rows, coverage=False):
+        if not rows:
+            return (
+                f'<article class="metric"><h3>{e(title)}</h3>'
+                '<p>No historical snapshots available</p></article>'
+            )
+
+        rows = sorted(rows, key=lambda r: r["date"])[-30:]
+        observed = [
+            r.get("counts", {}).get(level)
+            for r in rows for level in levels
+        ]
+        maximum = max(
+            [v for v in observed
+             if isinstance(v, (int, float)) and not isinstance(v, bool)
+             and v >= 0] or [1]
+        )
+        maximum = max(maximum, 1)
+
+        def x(i):
+            return 55 + 815 * i / max(len(rows) - 1, 1)
+
+        def y(v):
+            return 205 - 185 * v / maximum
+
+        lines = [
+            '<svg viewBox="0 0 900 250" role="img" '
+            f'aria-label="{e(title)} severity trends">',
+            '<line x1="55" y1="205" x2="870" y2="205" '
+            'stroke="#64748b"/>',
+        ]
+
+        for level in levels:
+            segment = []
+            for i, row in enumerate(rows):
+                value = row.get("counts", {}).get(level)
+                if (isinstance(value, (int, float))
+                        and not isinstance(value, bool) and value >= 0):
+                    segment.append(f"{x(i):.1f},{y(value):.1f}")
+                elif segment:
+                    lines.append(
+                        f'<polyline points="{" ".join(segment)}" '
+                        f'fill="none" stroke="{colors[level]}" '
+                        'stroke-width="2.5"/>'
+                    )
+                    segment = []
+            if segment:
+                lines.append(
+                    f'<polyline points="{" ".join(segment)}" '
+                    f'fill="none" stroke="{colors[level]}" '
+                    'stroke-width="2.5"/>'
+                )
+
+        # Numeric severity labels for observed points.
+        # Skip some labels on long histories to prevent collisions.
+        stride = max(1, (len(rows) + 11) // 12)
+        for i, row in enumerate(rows):
+            if i % stride and i != len(rows) - 1:
+                continue
+            for level_index, level in enumerate(levels):
+                value = row.get("counts", {}).get(level)
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    continue
+                if value < 0:
+                    continue
+                px, py = x(i), y(value)
+                lines.append(
+                    f'<circle cx="{px:.1f}" cy="{py:.1f}" r="3.5" '
+                    f'fill="{colors[level]}"/>'
+                )
+                # Alternating offsets keep labels readable where possible.
+                offset = (-10, 14, -10, 14)[level_index]
+                label_y = min(218, max(12, py + offset))
+                lines.append(
+                    f'<text x="{px:.1f}" y="{label_y:.1f}" '
+                    f'text-anchor="middle" fill="{colors[level]}" '
+                    f'font-size="12" font-weight="600">'
+                    f'{e(f"{value:g}")}</text>'
+                )
+
+        lines.append(
+            f'<text x="55" y="240" fill="#aeb8c5" font-size="13">'
+            f'{e(rows[0].get("timestamp", rows[0]["date"])[:16].replace("T", " "))}</text>'
+        )
+        lines.append(
+            f'<text x="870" y="240" text-anchor="end" '
+            f'fill="#aeb8c5" font-size="13">'
+            f'{e(rows[-1].get("timestamp", rows[-1]["date"])[:16].replace("T", " "))}</text></svg>'
+        )
+
+        header = (
+            "<tr><th>Date</th><th>Critical</th><th>High</th>"
+            "<th>Medium</th><th>Low</th>"
+            + ("<th>Coverage</th>" if coverage else "<th>Manual review</th>")
+            + "</tr>"
+        )
+
+        body = []
+        for row in reversed(rows):
+            counts = row.get("counts") or {}
+            cells = "".join(
+                "<td>" + (
+                    str(counts.get(level))
+                    if isinstance(counts.get(level), (int, float))
+                    else "N/A"
+                ) + "</td>"
+                for level in levels
+            )
+            extra = (
+                row.get("coverage", "unknown")
+                if coverage else row.get("manual_review", 0)
+            )
+            body.append(
+                f'<tr><td>{e(row.get("timestamp", row["date"]).replace("T", " ")[:19])}</td>{cells}'
+                f'<td>{e(extra)}</td></tr>'
+            )
+
+        legend = " &nbsp; ".join(
+            f'<span style="color:{colors[level]}">━━ {level}</span>'
+            for level in levels
+        )
+
+        return (
+            f'<article class="metric"><h3>{e(title)}</h3>'
+            '<p>' + legend + '</p>' + "".join(lines)
+            + '<div style="overflow-x:auto"><table style="width:100%;'
+            'text-align:left"><thead>' + header + '</thead><tbody>'
+            + "".join(body) + '</tbody></table></div></article>'
+        )
+
+    return (
+        '<section><h2>Vulnerability Trends (CTEM)</h2>'
+        '<p class="note">Actual scan dates. Container findings and '
+        'application advisories are separate sources; counts are not '
+        'summed because duplicate CVEs may occur. Manual review is '
+        'uncertain, not a confirmed severity. Missing observations '
+        'are not treated as zero.</p>'
+        '<div class="grid">'
+        + source_table("Debian OS vulnerabilities", debian, True)
+        + source_table("Container vulnerabilities", container, True)
+        + source_table("Application advisories", application, False)
+        + '</div></section>'
+    )
+
+
 def render():
     data = json.loads(SNAPSHOT.read_text())
     if data.get("schema_version") != 1:
@@ -207,7 +497,7 @@ def render():
         )
         sections.append(f"<section><h2>{e(heading)}</h2><div class='grid'>{charts}</div></section>")
 
-    return f'''<!doctype html>
+    _dashboard_html = f'''<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -239,5 +529,8 @@ section{{margin-bottom:32px}}
 &nbsp;&nbsp; <span style="color:#d8ad62">┄┄</span> Rolling 30-day average</p>
 </div>
 {''.join(sections)}
+{ctem_trends()}
 {security_monitoring()}
 </main></body></html>'''
+
+    return _dashboard_html

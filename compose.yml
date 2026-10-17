@@ -77,6 +77,15 @@ services:
       timeout: 5s
       retries: 10
 
+  news4legends-pdf-builder:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: docker/pdf/Dockerfile
+    image: news4legends-pdf-builder:local
+    volumes:
+      - ./assets:/output
+
 volumes:
   news4legends_data:
   news4legends_runtime:
