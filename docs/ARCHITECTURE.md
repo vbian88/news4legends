@@ -40,7 +40,7 @@ flowchart TB
     N --> W
 ```
 
-The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker stores seven-day run logs under `/data/logs` in `news4legends_runtime`. It also receives `config/collector.yaml`; local LLM credentials are supplied through the ignored `.env` or an operator-managed override. The worker has no host-published port; n8n reaches it by Compose service DNS.
+The UI database path is `/data/home-ai-news.db`; the worker path is `/config/home-ai-news.db`. Both refer to `news4legends_data`. The worker stores seven-day run logs under `/data/logs` in `news4legends_runtime`. It receives the host's `config/collector.yaml` at `/app/collector.yaml`, outside the worker's read-only database mount; local LLM credentials are supplied through the ignored `.env` or an operator-managed override. The worker has no host-published port; n8n reaches it by Compose service DNS.
 
 `news4legends-control` links internal services. `news4legends-llm` isolates the worker's gateway-facing path and is useful when an LLM gateway joins that Docker network. An externally hosted endpoint is also supported if reachable from the worker.
 
